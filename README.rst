@@ -5,10 +5,11 @@ survey of the Galactic Plane.
 
 Example use
 -----------
-Creating a multi-band PSF photometry catalogue from single-CCD data:
+Creating a multi-band catalogue of PSF photometry for a VPHAS pointing:
 ```Python
 import vphas
-cat = VphasFrameCatalogue('vphas_0149a', ccd=8).create_catalogue()
+pointing = vphas.VphasPointing('0149a')
+pointing.create_catalogue().write('mycatalogue.fits')
 ```
 
 Dependencies

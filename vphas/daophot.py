@@ -172,9 +172,8 @@ class Daophot(object):
                             output = self._path_cache['daofind_output'],
                             verify = 'no',
                             verbose = 'no',
-                            starmap= os.path.join(self._workdir, 'starmap.'))
-                            #skymap = os.path.join(self._workdir,
-                            #                      'skymap.'),
+                            starmap= os.path.join(self._workdir, 'starmap.'),
+                            skymap = os.path.join(self._workdir, 'skymap.'))
                             #Stdout = os.path.join(self._workdir,
                             #                     'log-daofind.txt'))
         iraf.daophot.daofind(**daofind_args)

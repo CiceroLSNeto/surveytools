@@ -1,6 +1,35 @@
 """Tools to create photometric catalogues from VPHAS data.
 
-Includes an IRAF/DAOPHOT wrapper class to carry out PSF photometry.
+Classes
+-------
+VphasFrame
+VphasFrameCatalogue
+VphasPointing
+
+Example use
+-----------
+Create a photometric catalogue of VPHAS pointing 0149a:
+```
+import vphas
+pointing = vphas.VphasPointing('0149a')
+pointing.create_catalogue().write('mycatalogue.fits')
+```
+
+Terminology
+-----------
+This module makes use of the concept of a `field`, a `pointing`, and a `frame`.
+defined as follows:
+* `field`: a region in the sky covered by 2 (or 3) offset pointings of the
+           telescope, identified using a 4-character wide, zero-padded number
+           string, e.g. '0149'.
+* `pointing`: a single position in the sky denoting one of the offsets that
+              make up a field, e.g. '0149a' (first offset),
+              '0149b' (second offset), '0149c' (third offset, for H-alpha and
+              some g-band observations only).
+* `frame`: area covered by a single ccd of a pointing, e.g. '0149a-8'.
+
+Each field has 1x2 pointings in u and i, 1x3 pointings in g and H-alpha,
+and 2x2 pointings in r. Each pointing consists of 32 ccd frames.
 """
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
@@ -35,16 +64,21 @@ from daophot import Daophot
 # CONSTANTS
 ###########
 
-WORKDIR = '/tmp/vphas'  # Where can we store temporary files?
+WORKDIR_DEFAULT = '/home/gb/tmp/vphas'  # Where can we store temporary files?
 USE_MULTIPROCESSING = True
 # Directory containing the calibration frames (confmaps and flat fields)
 CALIBDIR = '/home/gb/proj/fuor2014/data/images/full'
-DATADIR = '/home/gb/proj/fuor2014/data/images/full'
+DATADIR_DEFAULT = '/home/gb/proj/fuor2014/data/images/full'
 
 
 ###########
 # CLASSES
 ###########
+
+class NotObservedException(Exception):
+    """Raised if a requested field has not been observed yet."""
+    pass
+
 
 class VphasFrame(object):
     """Class representing a single-CCD image obtained by ESO's VST telescope.
@@ -63,17 +97,21 @@ class VphasFrame(object):
     confidence_threshold : float (optional)
         Pixels with a confidence lower than the threshold will be masked out
     """
-    def __init__(self, filename, extension=0, confidence_threshold=80., datadir=DATADIR):
+    def __init__(self, filename, extension=0, confidence_threshold=80., datadir=DATADIR_DEFAULT):
         if os.path.exists(filename):
             self.filename = filename
         elif os.path.exists(os.path.join(datadir, filename)):
             self.filename = os.path.join(datadir, filename)
         else:
             raise IOError('File not found:'+filename)
-        self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=WORKDIR)
+        self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=WORKDIR_DEFAULT)
         self._cache = {}
         self.extension = extension
         self.confidence_threshold = confidence_threshold
+
+    def __del__(self):
+        #del self._cache['daophot']
+        pass
 
     def __getstate__(self):
         """Prepare the object before pickling (serialization)."""
@@ -129,8 +167,8 @@ class VphasFrame(object):
         return self.hdulist[0].header['OBJECT']
 
     @cached_property
-    def name(self):
-        """VPHAS name of the image."""
+    def fieldname(self):
+        """VPHAS name of the field, e.g. '0001a'."""
         field_number = self.hdulist[0].header['ESO OBS NAME'].split('_')[1]
         expno = self.hdulist[0].header['ESO TPL EXPNO']
         if expno == 1:
@@ -139,7 +177,12 @@ class VphasFrame(object):
             offset = 'b'
         else:
             offset ='c'
-        return '{0}{1}-{2}-{3}'.format(field_number, offset, self.extension, self.band)
+        return '{0}{1}'.format(field_number, offset)
+
+    @cached_property
+    def name(self):
+        """VPHAS name of the frame, e.g. '0001a-8-r'."""
+        return '{0}-{1}-{2}'.format(self.fieldname, self.extension, self.band)
 
     @cached_property
     def band(self):
@@ -348,7 +391,7 @@ class VphasFrame(object):
         image_path = os.path.join(self._workdir, self.filtername+'.fits')
         if not os.path.exists(image_path):
             self._save_for_iraf(image_path)
-        dp = Daophot(image_path+'[1]', workdir=WORKDIR,
+        dp = Daophot(image_path+'[1]', workdir=WORKDIR_DEFAULT,
                      datamin=self.datamin, datamax=self.datamax,
                      epadu=self.gain, fwhmpsf=self.psf_fwhm,
                      itime=self.exposure_time,
@@ -439,7 +482,8 @@ class VphasFrame(object):
                                               tbl[self.band+'Y'] - tbl['YINIT'])
             tbl[self.band+'DetectionID'] = ['{0}-{1}'.format(self.name, idx) for idx in tbl[self.band+'ID']]
             tbl[self.band+'10sig'] = (
-                                (tbl[self.band + 'SNR'] > 10)
+                                (~np.isnan(tbl[self.band].filled(np.nan)))
+                                & (tbl[self.band + 'SNR'] > 10)
                                 & (tbl[self.band + 'Pier'] == 0)
                                 & (tbl[self.band + 'Chi'] < 1.5)
                                 & (tbl[self.band + 'Shift'] < 1)
@@ -461,29 +505,24 @@ class VphasFrameCatalogue(object):
 
     Parameters
     ----------
-    field : fieldname (e.g. 'vphas_0001a'), or list of filenames
+    frames : list of `VphasFrame` objects
 
     ccd : int
         Number of the OmegaCam CCD, corresponding to the extension number in
         the 32-CCD multi-extension FITS images produced by the camera.
     """
 
-    def __init__(self, field, ccd=1, workdir=WORKDIR):
-        if isinstance(field, (list, tuple)):
-            self.image_filenames = field
-        else:
-            m = VphasMetaData()
-            red_filenames = m.get_red_filenames('vphas_0149a')
-            blue_filenames = m.get_blue_filenames('vphas_0149a')
-            self.image_filenames = np.concatenate((red_filenames, blue_filenames))
-        self.images = [VphasFrame(fn, extension) for fn in self.image_filenames]
-
-        self.name = self.images[0].name.rpartition('-')[0]
+    def __init__(self, frames, ccd=1, workdir=WORKDIR_DEFAULT):
+        self.frames = frames
+        self.fieldname = self.frames[0].name.rpartition('-')[0]
+        self.ccd = ccd
+        self.name = '{0}-{1}'.format(self.fieldname, self.ccd)
+        # Setup the working directory to store temporary files
         self._workdir = tempfile.mkdtemp(prefix=self.name+'-', dir=workdir)
         log.info('Storing results in {0}'.format(self._workdir))
-        # Allow "self.cpufarm.map(f, param)" to be used for parallel processing
+        # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
         if USE_MULTIPROCESSING:
-            self.cpufarm = multiprocessing.Pool(len(self.images))
+            self.cpufarm = multiprocessing.Pool(len(self.frames))
         else:
             self.cpufarm = itertools  # Simple sequential processing
 
@@ -495,13 +534,9 @@ class VphasFrameCatalogue(object):
     def create_master_source_table(self):
         """Returns an astropy Table."""
         log.info('Creating the master source list')
-        # 4 sigma is recommended by the DAOPHOT manual, but 3-sigma
-        # does appear to recover a bunch more genuine sources at SNR > 5.       
-
         source_tables = {}
-        for tbl in self.cpufarm.imap(compute_source_table_task, self.images):
+        for tbl in self.cpufarm.imap(compute_source_table_task, self.frames):
             source_tables[tbl.meta['band']] = tbl
-
         # Now merge the single-band lists into a master source table
         master_table = source_tables['i']
         for band in ['ha', 'r', 'r2', 'g', 'u']:
@@ -516,33 +551,46 @@ class VphasFrameCatalogue(object):
 
     @timed
     def create_catalogue(self):
-        for img in self.images:
+        """Main function to compute the catalogue, which will take >minutes.
+
+        Returns
+        -------
+        catalogue : `astropy.table.Table` object
+            Table containing the band-merged catalogue.
+        """
+        for img in self.frames:
             img.populate_cache()
         source_table = self.create_master_source_table()
         source_table.write(os.path.join(self._workdir, self.name+'-sourcelist.fits'))
 
         jobs = []
-        for img in self.images:
+        for img in self.frames:
             params = {'image': img,
                       'ra': source_table['ra'],
                       'dec': source_table['dec'],
                       'workdir': self._workdir}
             jobs.append(params)
 
-        tables = self.cpufarm.map(compute_photometry_task, jobs)
+        tables = [tbl for tbl in self.cpufarm.imap(compute_photometry_task, jobs)]
         # Band-merge the tables
         merged = table.hstack(tables, metadata_conflicts='silent')
+        merged['field'] = self.fieldname
+        merged['ccd'] = self.ccd
         merged['umg'] = merged['u'] - merged['g']
         merged['gmr'] = merged['g'] - merged['r']
         merged['rmi'] = merged['r'] - merged['i']
         merged['rmha'] = merged['r'] - merged['ha']
-        merged['a10'] = (merged['u10sig'] & merged['g10sig'] & merged['r10sig']
-                         & merged['i10sig'] & merged['ha10sig'])
+        merged['a10'] = (merged['u10sig'].filled(False)
+                         & merged['g10sig'].filled(False)
+                         & merged['r10sig'].filled(False)
+                         & merged['i10sig'].filled(False)
+                         & merged['ha10sig'].filled(False))
         output_filename =  os.path.join(self._workdir, self.name+'-catalogue.fits')
         merged.write(output_filename, format='fits')
         # Now make diagnostic plots
         self.plot_psf()
         self.plot_subtracted_images()
+        return merged
 
     @timed
     def plot_psf(self):
@@ -550,7 +598,7 @@ class VphasFrameCatalogue(object):
         fig = pl.figure()
         cols = 3
         rows = 2
-        for idx, img in enumerate(self.images):
+        for idx, img in enumerate(self.frames):
             hdu = fits.open(os.path.join(self._workdir, img.name+'-psf.fits'))[0]
             psf = hdu.data[5:-5, 5:-5]
             ax = fig.add_subplot(rows, cols, idx+1)
@@ -569,12 +617,12 @@ class VphasFrameCatalogue(object):
 
     @timed
     def plot_subtracted_images(self):
-        """Plots the PSF-subtracted images as JPGs."""
+        """Plots the PSF-subtracted images as JPGs and saves them in the workdir."""
         # Save the images as quicklook jpg
         fig = pl.figure(figsize=(16, 9))
         cols = 6
         rows = 2        
-        for idx, img in enumerate(self.images):
+        for idx, img in enumerate(self.frames):
             vmin = np.percentile(img.hdu.data, 2)
             vmax = vmin + 50
             subimg = fits.open(os.path.join(self._workdir, img.name+'-sub.fits'))
@@ -606,63 +654,121 @@ class VphasFrameCatalogue(object):
                             vmin=np.log10(vmin), vmax=np.log10(vmax),
                             cmap=pl.cm.gist_heat, origin='lower')        
         fig.tight_layout()
-        plot_filename = os.path.join(self._workdir, self.name+'-sub.jpg')
+        plot_filename = os.path.join(self._workdir, self.fieldname+'-sub.jpg')
         fig.savefig(plot_filename, dpi=120)
         pl.close(fig)
 
 
-class VphasPointingCatalogue(object):
-    """A pointing is a single (ra,dec) position in the sky."""
-    def __init__(self, name):
-        self.name = name
+class VphasPointing(object):
+    """A pointing is a single (ra,dec) position in the sky.
 
+    Parameters
+    ----------
+    pointing_name : str
+        5-character wide identifier, composed of the 4-character wide VPHAS
+        field number, followed by 'a' (first offset), 'b' (second offset),
+        or 'c' (third offset used in the g and H-alpha bands only.)
+    """
+    def __init__(self, pointing_name, **kwargs):
+        if len(pointing_name) != 5 or not pointing_name.endswith(('a', 'b', 'c')):
+            raise ValueError('Illegal pointing name. Expected a string of the form "0001a".')
+        self.pointing_name = pointing_name
+        self.kwargs = kwargs
 
-class VphasMetaData(object):
+    @timed
+    def create_catalogue(self, ccdlist=range(1, 33)):
+        """Main function to create the catalogue.
 
-    def __init__(self):
-        self.table_red = Table.read('data/list-hari-image-files.fits')
-        self.table_blue = Table.read('data/list-ugr-image-files.fits')
+        Returns
+        -------
+        catalogue : `astropy.table.Table` object
+        """
+        # We do not tolerate red data missing
+        try:
+            image_filenames = self.get_red_filenames()
+        except NotObservedException as e:
+            log.error(e.message)
+            return
+        # We can tolerate the blue data missing
+        try:
+            image_filenames = np.concatenate((image_filenames, self.get_blue_filenames()))
+        except NotObservedException as e:
+            log.warning(e.message)
+        # Having obtained the filenames, start computing!
+        framecats = []
+        for ccd in ccdlist:
+            frames = [VphasFrame(fn, ccd, **self.kwargs) for fn in image_filenames]
+            vfc = VphasFrameCatalogue(frames, ccd=ccd)
+            framecats.append(vfc.create_catalogue())
+        catalogue = table.vstack(framecats, metadata_conflicts='silent')
+        return catalogue
 
-    def get_red_filenames(self, fieldname):
-        """Returns the H-alpha, r- and i-band image filename.
+    def get_red_filenames(self):
+        """Returns the H-alpha, r- and i-band FITS filenames of the red concat.
+
+        Parameters
+        ----------
+        pointing : str
+            Identifier of the VPHAS field; must be a 5-character wide string
+            composed of a 4-digit zero padded number followed by 'a', 'b', 
+            or 'c' to denote the offset, e.g. '0149a' is the first offset
+            of field 'vphas_0149'.
 
         Returns
         -------
         filenames : list of 3 strings
         """
-        assert fieldname.startswith('vphas_')
-        assert fieldname.endswith(('a', 'b', 'c'))
-        number = fieldname[:-1]
-        offset = fieldname[-1:]
+        metadata = Table.read('data/list-hari-image-files.fits')
+        fieldname = 'vphas_' + self.pointing_name[:-1]
+        # Has the field been observed?
+        if (metadata['Field_1'] == fieldname).sum() == 0:
+            raise NotObservedException('{0} has not been observed in the red filters'.format(self.fieldname))
         offset2idx = {'a': 0, 'b': -1, 'c': 1}
+        offset = offset2idx[self.pointing_name[-1:]]
         result = []
         for filtername in ['NB_659', 'r_SDSS', 'i_SDSS']:
-            mask = ((self.table_red['Field_1'] == number)
-                    & (self.table_red['filter'] == filtername))
-            filenames = self.table_red['image file'][mask]
+            mask = ((metadata['Field_1'] == fieldname)
+                    & (metadata['filter'] == filtername))
+            filenames = metadata['image file'][mask]
             if filtername == 'NB_659':
-                assert len(filenames) == 3
+                assert len(filenames) == 3  # sanity check
             else:
-                assert len(filenames) == 2
+                assert len(filenames) == 2  # sanity check
             filenames.sort()
-            result.append(filenames[offset2idx[offset]])
+            result.append(filenames[offset])
         return result
 
-    def get_blue_filenames(self, fieldname):
-        assert fieldname.startswith('vphas_')
-        assert fieldname.endswith(('a', 'b', 'c'))
-        number = fieldname[:-1]
-        offset = fieldname[-1:]
+    def get_blue_filenames(self):
+        """Returns the u-, g- and r-band FITS filenames of the blue concat.
+
+        Parameters
+        ----------
+        pointing : str
+            Identifier of the VPHAS field; must be a 5-character wide string
+            composed of a 4-digit zero padded number followed by 'a', 'b', 
+            or 'c' to denote the offset, e.g. '0149a' is the first offset
+            of field 'vphas_0149'.
+
+        Returns
+        -------
+        filenames : list of 3 strings
+        """
+        metadata = Table.read('data/list-ugr-image-files.fits')
+        fieldname = 'vphas_' + self.pointing_name[:-1]
+        # Has the field been observed?
+        if (metadata['Field_1'] == fieldname).sum() == 0:
+            raise NotObservedException('{0} has not been observed in the blue filters'.format(self.fieldname))
         offset2idx = {'a': 0, 'b': -1, 'c': 1}
+        offset = offset2idx[self.pointing_name[-1:]]
         result = []
         for filtername in ['u_SDSS', 'g_SDSS', 'r_SDSS']:
-            mask = ((self.table_blue['Field_1'] == number)
-                    & (self.table_blue['filter'] == filtername))
-            filenames = self.table_blue['image file'][mask]
+            mask = ((metadata['Field_1'] == fieldname)
+                    & (metadata['filter'] == filtername))
+            filenames = metadata['image file'][mask]
             if filtername != 'g_SDSS':
-                assert len(filenames) == 2
+                assert len(filenames) == 2  # sanity check
             filenames.sort()
-            result.append(filenames[offset2idx[offset]])
+            result.append(filenames[offset])
         return result
 
 
@@ -672,6 +778,8 @@ class VphasMetaData(object):
 
 # Define function for parallel processing
 def compute_source_table_task(image):
+    # 4 sigma is recommended by the DAOPHOT manual, but 3-sigma
+    # does appear to recover a bunch more genuine sources at SNR > 5.
     thresholds = {'u':5, 'g':5, 'r2':5, 'ha':5, 'r':5, 'i':3}
     return image.compute_source_table(psfrad_fwhm=3., maxiter=20, threshold=thresholds[image.band])
 
@@ -692,19 +800,7 @@ def compute_photometry_task(params):
 #######
 
 if __name__ == '__main__':    
-    """
-    image_filenames = ['o20120314_00016.fit', 'o20120314_00022.fit',
-                       'o20120314_00028.fit', 'o20121220_00106.fit',
-                       'o20121220_00099.fit', 'o20121220_00112.fit']
-    extension = 8
-    images = [VphasFrame(fn, extension) for fn in image_filenames]
-    """
-    vfc = VphasFrameCatalogue('vphas_0149a', ccd=8)
-    cat = vfc.create_catalogue()
-    #image = OmegacamImage('../data/images/full/o20121220_00099.fit', extension=8, band='ha')
-    #source_identification_task({'filename':'../data/images/full/o20121220_00099.fit', 'extension':8, 'band':'ha', 'threshold': 5})
-    """
-    m = VphasMetaData()
-    print(m.get_red_filenames('vphas_0149a'))
-    print(m.get_blue_filenames('vphas_0149a'))
-    """
+    # Example use:
+    vpc = VphasPointing('0149a')
+    cat = vpc.create_catalogue()
+    cat.write('/tmp/mycatalogue.fits', overwrite=True)
