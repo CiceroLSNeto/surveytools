@@ -16,4 +16,4 @@ Dependencies
 ------------
 * `astropy` v1.0
 * `astropy-photutils` v0.1
-* `pyraf` (and hence a local installation of IRAF)
+* `pyraf` (requires a local installation of IRAF)
