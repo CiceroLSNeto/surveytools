@@ -56,8 +56,7 @@ from astropy.utils.timer import timefunc
 import photutils
 import photutils.morphology
 
-from utils import cached_property, timed
-from daophot import Daophot
+from .utils import cached_property, timed
 
 
 ###########
@@ -391,6 +390,7 @@ class VphasFrame(object):
         image_path = os.path.join(self._workdir, self.filtername+'.fits')
         if not os.path.exists(image_path):
             self._save_for_iraf(image_path)
+        from .daophot import Daophot
         dp = Daophot(image_path+'[1]', workdir=WORKDIR_DEFAULT,
                      datamin=self.datamin, datamax=self.datamax,
                      epadu=self.gain, fwhmpsf=self.psf_fwhm,

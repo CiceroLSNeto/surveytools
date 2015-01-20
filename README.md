@@ -5,6 +5,11 @@ survey of the Galactic Plane.
 
 Example use
 -----------
+Creating a pretty plot showing the 32-CCD mosaic of a VST/OmegaCAM FITS file:
+```
+mosaicplot -o prettyplot.jpg omegacam_exposure.fits
+```
+
 Creating a multi-band catalogue of PSF photometry for a VPHAS pointing:
 ```Python
 import vphas

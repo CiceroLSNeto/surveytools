@@ -27,7 +27,7 @@ with warnings.catch_warnings():
     iraf.prcacheOff()
     iraf.set(writepars=0)
 
-from utils import timed
+from .utils import timed
 
 
 class Daophot(object):
