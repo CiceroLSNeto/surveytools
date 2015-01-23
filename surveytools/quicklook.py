@@ -9,6 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as pl
 from matplotlib.colors import LogNorm
 import numpy as np
+from progressbar import ProgressBar
 
 from astropy import log
 from astropy.io import fits
@@ -52,6 +53,7 @@ def mosaicplot(filename, out_fn=None, dpi=100,
     if cmap not in pl.cm.datad.keys():
         raise ValueError('{0} is not a valid matplotlib colormap '
                          'name'.format(cmap))
+    log.info('Writing {0}'.format(out_fn))
     # Prepare the plot
     f = fits.open(filename)
     pl.interactive(False)
@@ -63,8 +65,9 @@ def mosaicplot(filename, out_fn=None, dpi=100,
                              f[32].data[::20, ::10]))
     vmin, vmax = np.percentile(sample, [min_percent, max_percent])
     del sample  # save memory
-    log.info('vmin={0}, vmax={1}'.format(vmin, vmax))
+    log.debug('mosaicplot: vmin={0}, vmax={1}'.format(vmin, vmax))
     # Plot the extensions
+    pbar = ProgressBar(32).start()
     for idx, hduno in enumerate(OMEGACAM_CCD_ARRANGEMENT):
         log.debug('mosaicplot: adding HDU #{0}'.format(hduno))
         ax = fig.add_subplot(4, 8, idx+1)
@@ -76,6 +79,9 @@ def mosaicplot(filename, out_fn=None, dpi=100,
         ax.set_xticks([])
         ax.set_yticks([])
         ax.axis('off')
+        pbar.update(idx)
+    pbar.finish()
+
     # Aesthetics and colorbar
     fig.subplots_adjust(left=0.04, right=0.85,
                         top=0.93, bottom=0.05,
@@ -99,7 +105,6 @@ def mosaicplot(filename, out_fn=None, dpi=100,
         log.warning('Could not write footer text: {0}'.format(e))
         pass
     # We're done
-    log.info('Writing {0}'.format(out_fn))
     fig.savefig(out_fn, dpi=dpi)
     pl.close()
     del f
@@ -129,6 +134,7 @@ def mosaicplot_main(args=None):
     for filename in args.filename:
         mosaicplot(filename,
                    out_fn=args.o,
+                   dpi=args.dpi,
                    min_percent=args.min_percent,
                    max_percent=args.max_percent,
                    cmap=args.cmap)
