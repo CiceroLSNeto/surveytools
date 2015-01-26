@@ -1,1 +1,1 @@
-from catalogue import *
+from catalogue import VphasFrame, VphasFrameCatalogue, VphasOffsetPointing

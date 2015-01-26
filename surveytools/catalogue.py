@@ -4,14 +4,14 @@ Classes
 -------
 VphasFrame
 VphasFrameCatalogue
-VphasPointing
+VphasOffsetPointing
 
 Example use
 -----------
 Create a photometric catalogue of VPHAS pointing 0149a:
 ```
 import vphas
-pointing = vphas.VphasPointing('0149a')
+pointing = vphas.VphasOffsetPointing('0149a')
 pointing.create_catalogue().write('mycatalogue.fits')
 ```
 
@@ -63,11 +63,11 @@ from .utils import cached_property, timed
 # CONSTANTS
 ###########
 
-WORKDIR_DEFAULT = '/home/gb/tmp/vphas'  # Where can we store temporary files?
+WORKDIR_DEFAULT = '/home/gb/tmp/vphas-workdir'  # Where can we store temporary files?
 USE_MULTIPROCESSING = True
 # Directory containing the calibration frames (confmaps and flat fields)
-CALIBDIR = '/home/gb/proj/fuor2014/data/images/full'
-DATADIR_DEFAULT = '/home/gb/proj/fuor2014/data/images/full'
+CALIBDIR = '/home/gb/tmp/vphas/calib'
+DATADIR_DEFAULT = '/home/gb/tmp/vphas/single'
 
 
 ###########
@@ -102,7 +102,7 @@ class VphasFrame(object):
         elif os.path.exists(os.path.join(datadir, filename)):
             self.filename = os.path.join(datadir, filename)
         else:
-            raise IOError('File not found:'+filename)
+            raise IOError('File not found:' + os.path.join(datadir, filename))
         self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=WORKDIR_DEFAULT)
         self._cache = {}
         self.extension = extension
@@ -659,7 +659,7 @@ class VphasFrameCatalogue(object):
         pl.close(fig)
 
 
-class VphasPointing(object):
+class VphasOffsetPointing(object):
     """A pointing is a single (ra,dec) position in the sky.
 
     Parameters
@@ -794,13 +794,3 @@ def compute_photometry_task(params):
     dp.get_subimage().writeto(sub_filename)
     return tbl
 
-
-#######
-# MAIN
-#######
-
-if __name__ == '__main__':    
-    # Example use:
-    vpc = VphasPointing('0149a')
-    cat = vpc.create_catalogue()
-    cat.write('/tmp/mycatalogue.fits', overwrite=True)

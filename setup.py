@@ -2,15 +2,15 @@
 from setuptools import setup
 
 entry_points = {'console_scripts': [
-    'mosaicplot = vphas.quicklook:mosaicplot_main'
+    'mosaicplot = surveytools.quicklook:mosaicplot_main'
 ]}
 
-setup(name='vphastools',
+setup(name='surveytools',
       version='0.1',
       description='Tools for the VPHAS+ astronomy survey.',
       author='Geert Barentsen',
       license='MIT',
       url='http://www.vphas.eu',
-      packages=['vphas'],
+      packages=['surveytools'],
       entry_points=entry_points,
       )
