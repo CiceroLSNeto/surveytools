@@ -2,7 +2,7 @@
 from setuptools import setup
 
 entry_points = {'console_scripts': [
-    'mosaicplot = surveytools.quicklook:mosaicplot_main'
+    'vst-pawplot = surveytools.quicklook:vst_pawplot_main'
 ]}
 
 setup(name='surveytools',

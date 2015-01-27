@@ -2,12 +2,13 @@
 
 Usage
 =====
-`mosaicplot filename.fits`
+`vst-pawplot filename.fits`
 """
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as pl
 from matplotlib.colors import LogNorm
+import matplotlib.patheffects as path_effects
 import numpy as np
 from progressbar import ProgressBar
 
@@ -22,9 +23,9 @@ OMEGACAM_CCD_ARRANGEMENT = [32, 31, 30, 29, 16, 15, 14, 13,
                             20, 19, 18, 17,  4,  3,  2,  1]
 
 
-def mosaicplot(filename, out_fn=None, dpi=100,
-               min_percent=1.0, max_percent=99.5,
-               cmap='gist_heat'):
+def vst_pawplot(filename, out_fn=None, dpi=100,
+                min_percent=1.0, max_percent=99.5,
+                cmap='gist_heat', show_hdu=False):
     """Plots the 32-CCD OmegaCam mosaic as a pretty bitmap.
 
     Parameters
@@ -47,6 +48,8 @@ def mosaicplot(filename, out_fn=None, dpi=100,
     cmap : str, optional
         The matplotlib color map name.  The default is 'gist_heat',
         can also be e.g. 'Greys_r'.
+    show_hdu : boolean, optional
+        Plot the HDU extension number if True (default: False).
     """
     if out_fn is None:
         out_fn = filename + '.png'
@@ -65,11 +68,11 @@ def mosaicplot(filename, out_fn=None, dpi=100,
                              f[32].data[::20, ::10]))
     vmin, vmax = np.percentile(sample, [min_percent, max_percent])
     del sample  # save memory
-    log.debug('mosaicplot: vmin={0}, vmax={1}'.format(vmin, vmax))
+    log.debug('vst_pawplot: vmin={0}, vmax={1}'.format(vmin, vmax))
     # Plot the extensions
     pbar = ProgressBar(32).start()
     for idx, hduno in enumerate(OMEGACAM_CCD_ARRANGEMENT):
-        log.debug('mosaicplot: adding HDU #{0}'.format(hduno))
+        log.debug('vst_pawplot: adding HDU #{0}'.format(hduno))
         ax = fig.add_subplot(4, 8, idx+1)
         sampling = int(500 / dpi)
         im = ax.matshow(f[hduno].data[::sampling, ::-sampling],
@@ -79,6 +82,13 @@ def mosaicplot(filename, out_fn=None, dpi=100,
         ax.set_xticks([])
         ax.set_yticks([])
         ax.axis('off')
+        if show_hdu:
+            # Show the HDU extension number on top of the image
+            txt = ax.text(0.05, 0.97, hduno, fontsize=14, color='white',
+                          ha='left', va='top', transform=ax.transAxes)
+            # Add a black border around the text
+            txt.set_path_effects([path_effects.Stroke(linewidth=2, foreground='black'),
+                                  path_effects.Normal()])
         pbar.update(idx)
     pbar.finish()
 
@@ -109,7 +119,7 @@ def mosaicplot(filename, out_fn=None, dpi=100,
     pl.close()
     del f
 
-def mosaicplot_main(args=None):
+def vst_pawplot_main(args=None):
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -127,18 +137,22 @@ def mosaicplot_main(args=None):
                               'maximum cut level'))
     parser.add_argument('--cmap', metavar='colormap_name', type=str,
                         default='gist_heat', help='matplotlib color map name')
+    parser.add_argument('--show-hdu', action='store_true',
+                        help='Display the HDU extension numbers.')
     parser.add_argument('filename', nargs='+',
                         help='Path to one or more FITS files to convert')
     args = parser.parse_args(args)
 
     for filename in args.filename:
-        mosaicplot(filename,
-                   out_fn=args.o,
-                   dpi=args.dpi,
-                   min_percent=args.min_percent,
-                   max_percent=args.max_percent,
-                   cmap=args.cmap)
+        vst_pawplot(filename,
+                    out_fn=args.o,
+                    dpi=args.dpi,
+                    min_percent=args.min_percent,
+                    max_percent=args.max_percent,
+                    cmap=args.cmap,
+                    show_hdu=args.show_hdu)
+
 
 if __name__ == '__main__':
-    #plot_omegacam_mosaic('/home/gb/tmp/vphas-201208/single/o20120813_00071.fit', 'test.jpg')
-    mosaicplot('/local/home/gb/tmp/vphas-201209/single/o20120918_00025.fit', '/tmp/test.jpg')
+    # Example use:
+    vst_pawplot('/local/home/gb/tmp/vphas-201209/single/o20120918_00025.fit', '/tmp/test.jpg')
