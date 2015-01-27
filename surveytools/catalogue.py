@@ -56,6 +56,7 @@ from astropy.utils.timer import timefunc
 import photutils
 import photutils.morphology
 
+from . import SURVEYTOOLS_DATA
 from .utils import cached_property, timed
 
 
@@ -103,6 +104,7 @@ class VphasFrame(object):
             self.filename = os.path.join(datadir, filename)
         else:
             raise IOError('File not found:' + os.path.join(datadir, filename))
+        log.debug('Initializing VphasFrame({0}, {1})'.format(filename, extension))
         self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=WORKDIR_DEFAULT)
         self._cache = {}
         self.extension = extension
@@ -718,7 +720,7 @@ class VphasOffsetPointing(object):
         -------
         filenames : list of 3 strings
         """
-        metadata = Table.read('data/list-hari-image-files.fits')
+        metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-hari-image-files.fits'))
         fieldname = 'vphas_' + self.pointing_name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
@@ -753,7 +755,7 @@ class VphasOffsetPointing(object):
         -------
         filenames : list of 3 strings
         """
-        metadata = Table.read('data/list-ugr-image-files.fits')
+        metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-ugr-image-files.fits'))
         fieldname = 'vphas_' + self.pointing_name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:

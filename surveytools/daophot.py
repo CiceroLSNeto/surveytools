@@ -7,6 +7,7 @@ import shutil
 import warnings
 import tempfile
 
+from astropy import log
 from astropy import table
 from astropy.table import Table
 from astropy.io import fits
@@ -30,6 +31,11 @@ with warnings.catch_warnings():
 from .utils import timed
 
 
+class DaophotError(Exception):
+    """Raised if a requested field has not been observed yet."""
+    pass
+
+
 class Daophot(object):
     """DAOPHOT wrapper class.
 
@@ -45,7 +51,7 @@ class Daophot(object):
 
     def __del__(self):
         """Destructor; cleans up the temporary directory."""
-        shutil.rmtree(self._workdir)
+        pass #shutil.rmtree(self._workdir)
 
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1., fitsky='yes', function='moffat25', fwhmpsf=3., itime=10., maxiter=50,
                     maxnpsf=25, mergerad_fwhm=2., nclean=5, psfrad_fwhm=10., ratio=1., theta=0., readnoi=0, sigma=5., threshold=3.,
@@ -181,7 +187,11 @@ class Daophot(object):
     def apphot(self, output_filename='output-apphot.txt',
                             coords=None):
         if coords is None:
-            coords = self._path_cache['daofind_output']
+            try:
+                coords = self._path_cache['daofind_output']
+            except KeyError:
+                raise DaophotError('You need to run Daophot.daofind '
+                                   'before Daophot.apphot can be used.')
         self._path_cache['apphot_output'] = os.path.join(self._workdir, output_filename)
         phot_args = dict(image = self._path_cache['image_path'],
                          output = self._path_cache['apphot_output'],
@@ -193,8 +203,18 @@ class Daophot(object):
         iraf.daophot.phot(**phot_args)
 
     @timed
-    def psf(self):
-        """Returns the path of the fitted PSF model."""
+    def psf(self, failsafe=True):
+        """Fits a PSF model.
+
+        Parameters
+        ----------
+        failsafe : bool
+            If true and the PSF fitting fails to converge, then re-try the fit
+            automatically with varorder = 0 and function = 'auto'.
+        """
+        if not self._path_cache.has_key('apphot_output'):
+            raise DaophotError('You need to run Daophot.apphot '
+                               'before Daophot.psf can be used.')
         self._path_cache['pstselect_output'] = os.path.join(self._workdir, 'output-pstselect.txt')
         pstselect_args = dict(mode = 'h',
                               image = self._path_cache['image_path'],
@@ -202,9 +222,9 @@ class Daophot(object):
                               pstfile = self._path_cache['pstselect_output'],
                               verify = 'no',
                               interactive = 'no',
-                              verbose = 'no')
-                              #Stdout = os.path.join(self._workdir,
-                              #                      'log-pstselect.txt'))
+                              verbose = 'yes',
+                              Stdout = str(os.path.join(self._workdir,
+                                                    'log-pstselect.txt')))
         iraf.daophot.pstselect(**pstselect_args)
         
         #self._path_cache['psf_output'] = os.path.join(self._workdir, 'output-psf')  # daophot will append .fits
@@ -220,10 +240,21 @@ class Daophot(object):
                         verify = 'no',
                         interactive = 'no',
                         cache = 'yes',
-                        verbose = 'no') #,
-                        #Stdout = os.path.join(self._workdir,
-                        #                      'log-psf.txt'))
+                        verbose = 'yes',
+                        Stdout = str(os.path.join(self._workdir,
+                                              'log-psf.txt')))
         iraf.daophot.psf(**psf_args)
+
+        # It is possible for iraf.daophot.psf() to fail to converge.
+        # In this case, we re-try with more easy-to-fit settings.
+        if failsafe and not os.path.exists(self._path_cache['psf_output'] + '.fits'):
+            log.warning('iraf.daophot.psf appears to have failed; '
+                        'now trying again in failsafe mode.')
+            tmp_varorder, tmp_function = iraf.daopars.varorder, iraf.daopars.function
+            iraf.daopars.varorder = 0
+            iraf.daopars.function = 'auto'
+            iraf.daophot.psf(**psf_args)
+            iraf.daopars.varorder, iraf.daopars.function = tmp_varorder, tmp_function
 
         # Save the resulting PSF into a user-friendly FITS file
         self._path_cache['seepsf_output'] = os.path.join(self._workdir, 'output-seepsf')  # daophot will append .fits
@@ -233,6 +264,9 @@ class Daophot(object):
 
     @timed
     def allstar(self):
+        if not self._path_cache.has_key('psf_output'):
+            raise DaophotError('You need to run Daophot.psf '
+                               'before Daophot.allstar can be used.')
         self._path_cache['allstar_output'] = os.path.join(self._workdir, 'output-allstar.txt')
         self._path_cache['subimage_output'] = os.path.join(self._workdir, 'output-subimage')  # daophot will append .fits
         stderr = allstar_args = dict(image = self._path_cache['image_path'],
