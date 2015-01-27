@@ -36,6 +36,7 @@ from __future__ import (absolute_import, division, print_function,
 
 import os
 import shutil
+import warnings
 import tempfile
 import itertools
 import multiprocessing
@@ -55,6 +56,7 @@ from astropy.utils.timer import timefunc
 
 import photutils
 import photutils.morphology
+from photutils.background import Background
 
 from . import SURVEYTOOLS_DATA
 from .utils import cached_property, timed
@@ -65,10 +67,11 @@ from .utils import cached_property, timed
 ###########
 
 WORKDIR_DEFAULT = '/home/gb/tmp/vphas-workdir'  # Where can we store temporary files?
-USE_MULTIPROCESSING = True
+USE_MULTIPROCESSING = False
 # Directory containing the calibration frames (confmaps and flat fields)
-CALIBDIR = '/home/gb/tmp/vphas/calib'
-DATADIR_DEFAULT = '/home/gb/tmp/vphas/single'
+DATAPATH = '/home/gb/tmp/vphasdisk'
+CALIBDIR = os.path.join(DATAPATH, 'calib')
+DATADIR_DEFAULT = os.path.join(DATAPATH, 'single')
 
 
 ###########
@@ -94,21 +97,26 @@ class VphasFrame(object):
     band : str (optional)
         Colloquial name of the filter.
 
+    subtract_sky : boolean (optional)
+        TBD
+
     confidence_threshold : float (optional)
         Pixels with a confidence lower than the threshold will be masked out
     """
-    def __init__(self, filename, extension=0, confidence_threshold=80., datadir=DATADIR_DEFAULT):
+    def __init__(self, filename, extension=0, confidence_threshold=80.,
+                 subtract_sky=True, datadir=DATADIR_DEFAULT):
         if os.path.exists(filename):
             self.filename = filename
         elif os.path.exists(os.path.join(datadir, filename)):
             self.filename = os.path.join(datadir, filename)
         else:
             raise IOError('File not found:' + os.path.join(datadir, filename))
-        log.debug('Initializing VphasFrame({0}, {1})'.format(filename, extension))
         self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=WORKDIR_DEFAULT)
         self._cache = {}
         self.extension = extension
         self.confidence_threshold = confidence_threshold
+        self._preprocess_image(subtract_sky=subtract_sky)
+
 
     def __del__(self):
         #del self._cache['daophot']
@@ -123,6 +131,32 @@ class VphasFrame(object):
             except KeyError:
                 pass
         return self.__dict__
+
+    def _preprocess_image(self, subtract_sky=False):
+        """Save the image to FITS file which can be understood by IRAF.
+
+        IRAF/DAOPHOT does not appears to support RICE-compressed files,
+        and does not allow a weight (confidence) map to be provided.
+        This method saves the image to an uncompressed FITS file in
+        which low-confidence areas are masked out, suitable for
+        analysis by IRAF tasks.
+
+        In addition, this step allows large-scale structures in the sky
+        background to be subtracted.""" 
+        imgdata = fits.open(self.filename)[self.extension].data
+        if subtract_sky:
+            bg = Background(imgdata, (41, 64), filter_shape=(3, 3), method='median')
+            imgdata = imgdata - (bg.background - bg.background_median)
+        
+        # TODO: include pixel mask when subtracting background
+        # TODO: FIX BAD PIXEL MASKING!!
+        #imgdata[self.bad_pixel_mask] = self.datamin - 1
+        newhdu = fits.PrimaryHDU(imgdata, self.hdu.header)
+        nosky_path = os.path.join(self._workdir, self.filtername+'.fits')
+        newhdu.writeto(nosky_path)
+        log.info('Writing sky-subtracted image to {0}'.format(nosky_path))
+        self.filename = nosky_path
+        self.extension = 0
 
     def populate_cache(self):
         """Populate the cache.
@@ -332,7 +366,7 @@ class VphasFrame(object):
         """Estimates the median sky level and standard deviation."""
         from photutils.extern.imageutils.stats import sigma_clipped_stats
         mean, median, sigma = sigma_clipped_stats(self.hdu.data[~self.bad_pixel_mask], sigma=3.0)
-        log.debug('sky estimate = {0:.1f} +/- {1:.1f}'.format(median, sigma))
+        log.debug('{0} sky estimate = {1:.1f} +/- {2:.1f}'.format(self.band, median, sigma))
         self._cache['sky_mean'] = mean
         self._cache['sky_median'] = median
         self._cache['sky_sigma'] = sigma
@@ -374,26 +408,12 @@ class VphasFrame(object):
         self._cache['psf_theta'] = theta
         del self.hdu.data  # free memory
 
-    def _save_for_iraf(self, filename):
-        """Save the image to FITS file which can be understood by IRAF.
-
-        IRAF/DAOPHOT does not appears to support RICE-compressed files,
-        and does not allow a weight (confidence) map to be provided.
-        This method saves the image to an uncompressed FITS file in
-        which low-confidence areas are masked out, suitable for
-        analysis by IRAF tasks.""" 
-        mydata = self.hdu.data.copy()
-        mydata[self.bad_pixel_mask] = self.datamin - 1
-        newhdu = fits.ImageHDU(mydata, self.hdu.header)
-        newhdu.writeto(filename)
-
     def daophot(self, **kwargs):
         """Returns a Daophot object, pre-configured to work on the image."""
-        image_path = os.path.join(self._workdir, self.filtername+'.fits')
-        if not os.path.exists(image_path):
-            self._save_for_iraf(image_path)
+        image_path = '{0}[{1}]'.format(self.filename, self.extension)
+        log.debug('{0}: initiating daophot session for file {1}'.format(self.band, image_path))
         from .daophot import Daophot
-        dp = Daophot(image_path+'[1]', workdir=WORKDIR_DEFAULT,
+        dp = Daophot(image_path, workdir=WORKDIR_DEFAULT,
                      datamin=self.datamin, datamax=self.datamax,
                      epadu=self.gain, fwhmpsf=self.psf_fwhm,
                      itime=self.exposure_time,
@@ -516,7 +536,7 @@ class VphasFrameCatalogue(object):
 
     def __init__(self, frames, ccd=1, workdir=WORKDIR_DEFAULT):
         self.frames = frames
-        self.fieldname = self.frames[0].name.rpartition('-')[0]
+        self.fieldname = self.frames[0].name.split('-')[0]
         self.ccd = ccd
         self.name = '{0}-{1}'.format(self.fieldname, self.ccd)
         # Setup the working directory to store temporary files
@@ -553,13 +573,14 @@ class VphasFrameCatalogue(object):
 
     @timed
     def create_catalogue(self):
-        """Main function to compute the catalogue, which will take >minutes.
+        """Main function to compute the catalogue, which will take a few minutes.
 
         Returns
         -------
         catalogue : `astropy.table.Table` object
             Table containing the band-merged catalogue.
         """
+        log.info('{0}: started creating a catalogue for ccd {1}'.format(self.fieldname, self.ccd))
         for img in self.frames:
             img.populate_cache()
         source_table = self.create_master_source_table()
@@ -693,9 +714,10 @@ class VphasOffsetPointing(object):
             return
         # We can tolerate the blue data missing
         try:
-            image_filenames = np.concatenate((image_filenames, self.get_blue_filenames()))
+            image_filenames = np.concatenate((self.get_blue_filenames(), image_filenames))
         except NotObservedException as e:
             log.warning(e.message)
+        log.debug('{0}: filenames: {1}'.format(self.pointing_name, image_filenames))
         # Having obtained the filenames, start computing!
         framecats = []
         for ccd in ccdlist:
@@ -720,7 +742,9 @@ class VphasOffsetPointing(object):
         -------
         filenames : list of 3 strings
         """
-        metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-hari-image-files.fits'))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message='(.*)did not parse as fits unit(.*)')
+            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-hari-image-files.fits'))
         fieldname = 'vphas_' + self.pointing_name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
@@ -755,7 +779,9 @@ class VphasOffsetPointing(object):
         -------
         filenames : list of 3 strings
         """
-        metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-ugr-image-files.fits'))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message='(.*)did not parse as fits unit(.*)')
+            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-ugr-image-files.fits'))
         fieldname = 'vphas_' + self.pointing_name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
