@@ -67,12 +67,11 @@ from .utils import cached_property, timed
 ###########
 
 WORKDIR_DEFAULT = '/home/gb/tmp/vphas-workdir'  # Where can we store temporary files?
-USE_MULTIPROCESSING = False
+USE_MULTIPROCESSING = True
 # Directory containing the calibration frames (confmaps and flat fields)
 DATAPATH = '/home/gb/tmp/vphasdisk'
 CALIBDIR = os.path.join(DATAPATH, 'calib')
 DATADIR_DEFAULT = os.path.join(DATAPATH, 'single')
-
 
 ###########
 # CLASSES
@@ -104,14 +103,14 @@ class VphasFrame(object):
         Pixels with a confidence lower than the threshold will be masked out
     """
     def __init__(self, filename, extension=0, confidence_threshold=80.,
-                 subtract_sky=True, datadir=DATADIR_DEFAULT):
+                 subtract_sky=True, datadir=DATADIR_DEFAULT, workdir=WORKDIR_DEFAULT):
         if os.path.exists(filename):
             self.filename = filename
         elif os.path.exists(os.path.join(datadir, filename)):
             self.filename = os.path.join(datadir, filename)
         else:
             raise IOError('File not found:' + os.path.join(datadir, filename))
-        self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=WORKDIR_DEFAULT)
+        self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=workdir)
         self._cache = {}
         self.extension = extension
         self.confidence_threshold = confidence_threshold
@@ -125,7 +124,7 @@ class VphasFrame(object):
     def __getstate__(self):
         """Prepare the object before pickling (serialization)."""
         # Pickle does not like serializing `astropy.io.fits.hdu` objects
-        for key in ['hdu', 'hdulist', 'confidence_map_hdu']:
+        for key in ['hdu', 'confidence_map_hdu']:
             try:
                 del self._cache[key]
             except KeyError:
@@ -143,7 +142,8 @@ class VphasFrame(object):
 
         In addition, this step allows large-scale structures in the sky
         background to be subtracted.""" 
-        imgdata = fits.open(self.filename)[self.extension].data
+        fts = fits.open(self.filename)
+        imgdata = fts[self.extension].data
         if subtract_sky:
             bg = Background(imgdata, (41, 64), filter_shape=(3, 3), method='median')
             imgdata = imgdata - (bg.background - bg.background_median)
@@ -151,8 +151,11 @@ class VphasFrame(object):
         # TODO: include pixel mask when subtracting background
         # TODO: FIX BAD PIXEL MASKING!!
         #imgdata[self.bad_pixel_mask] = self.datamin - 1
-        newhdu = fits.PrimaryHDU(imgdata, self.hdu.header)
-        nosky_path = os.path.join(self._workdir, self.filtername+'.fits')
+        newhdu = fits.PrimaryHDU(imgdata, fts[self.extension].header)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message='(.*)FITS standard(.*)')
+        newhdu.header.extend(fts[0].header, unique=True)
+        nosky_path = os.path.join(self._workdir, '{0}.fits'.format(fts[0].header['ESO INS FILT1 NAME']))
         newhdu.writeto(nosky_path)
         log.info('Writing sky-subtracted image to {0}'.format(nosky_path))
         self.filename = nosky_path
@@ -169,18 +172,14 @@ class VphasFrame(object):
         self._estimate_psf()
 
     @cached_property
-    def hdulist(self):
-        """HDUList object corresponding to the FITS file.
-
-        This is not a @cached_property to enable pickling to work."""
-        return fits.open(self.filename)
+    def hdu(self):
+        """FITS HDU object corresponding to the image."""
+        return fits.open(self.filename)[self.extension]
 
     @cached_property
-    def hdu(self):
-        """FITS HDU object corresponding to the image.
-
-        This is not a @cached_property to enable pickling to work."""
-        return fits.open(self.filename)[self.extension]
+    def header(self):
+        """FITS header object."""
+        return self.hdu.header
 
     @cached_property
     def confidence_map_path(self):
@@ -199,16 +198,16 @@ class VphasFrame(object):
     @cached_property
     def object(self):
         """Astronomical target."""
-        return self.hdulist[0].header['OBJECT']
+        return self.header['OBJECT']
 
     @cached_property
     def fieldname(self):
         """VPHAS name of the field, e.g. '0001a'."""
-        field_number = self.hdulist[0].header['ESO OBS NAME'].split('_')[1]
-        expno = self.hdulist[0].header['ESO TPL EXPNO']
+        field_number = self.header['ESO OBS NAME'].split('_')[1]
+        expno = self.header['ESO TPL EXPNO']
         if expno == 1:
             offset = 'a'
-        elif expno < self.hdulist[0].header['ESO TPL NEXP']:
+        elif expno < self.header['ESO TPL NEXP']:
             offset = 'b'
         else:
             offset ='c'
@@ -228,24 +227,24 @@ class VphasFrame(object):
         """
         bandnames = {'uu': 'u', 'ug': 'g', 'ur': 'r2',
                      'hh': 'ha', 'hr': 'r', 'hi': 'i'}
-        obsname = self.hdulist[0].header['ESO OBS NAME']
+        obsname = self.header['ESO OBS NAME']
         return bandnames[obsname.split('_')[2][0:2]]
 
     @cached_property
     def filtername(self):
         """Filter name."""
-        return self.hdulist[0].header['HIERARCH ESO INS FILT1 NAME']
+        return self.header['ESO INS FILT1 NAME']
 
     @cached_property
     def exposure_time(self):
         """Exposure time [seconds]."""
-        return self.hdulist[0].header['EXPTIME']
+        return self.header['EXPTIME']
 
     @cached_property
     def airmass(self):
         """Airmass."""
-        return (self.hdulist[0].header['HIERARCH ESO TEL AIRM START']
-                + self.hdulist[0].header['HIERARCH ESO TEL AIRM END']) / 2.
+        return (self.header['ESO TEL AIRM START']
+                + self.header['ESO TEL AIRM END']) / 2.
 
     @cached_property
     def zeropoint(self):
@@ -258,7 +257,7 @@ class VphasFrame(object):
         """Detector gain [electrons / adu]."""
         # WARNING: OmegaCam headers contain gain in "ADU per electron",
         # we need to convert this to "electron per ADU" for DAOPHOT.
-        return 1. / self.hdu.header['HIERARCH ESO DET OUT1 GAIN']
+        return 1. / self.hdu.header['ESO DET OUT1 GAIN']
 
     @cached_property
     def readnoise(self):
@@ -413,7 +412,7 @@ class VphasFrame(object):
         image_path = '{0}[{1}]'.format(self.filename, self.extension)
         log.debug('{0}: initiating daophot session for file {1}'.format(self.band, image_path))
         from .daophot import Daophot
-        dp = Daophot(image_path, workdir=WORKDIR_DEFAULT,
+        dp = Daophot(image_path, workdir=self._workdir,
                      datamin=self.datamin, datamax=self.datamax,
                      epadu=self.gain, fwhmpsf=self.psf_fwhm,
                      itime=self.exposure_time,
@@ -527,7 +526,7 @@ class VphasFrameCatalogue(object):
 
     Parameters
     ----------
-    frames : list of `VphasFrame` objects
+    frames : dictionary of (band, `VphasFrame`) pairs
 
     ccd : int
         Number of the OmegaCam CCD, corresponding to the extension number in
@@ -536,7 +535,7 @@ class VphasFrameCatalogue(object):
 
     def __init__(self, frames, ccd=1, workdir=WORKDIR_DEFAULT):
         self.frames = frames
-        self.fieldname = self.frames[0].name.split('-')[0]
+        self.fieldname = self.frames['i'].name.split('-')[0]
         self.ccd = ccd
         self.name = '{0}-{1}'.format(self.fieldname, self.ccd)
         # Setup the working directory to store temporary files
@@ -557,11 +556,13 @@ class VphasFrameCatalogue(object):
         """Returns an astropy Table."""
         log.info('Creating the master source list')
         source_tables = {}
-        for tbl in self.cpufarm.imap(compute_source_table_task, self.frames):
+        for tbl in self.cpufarm.imap(compute_source_table_task, self.frames.values()):
             source_tables[tbl.meta['band']] = tbl
         # Now merge the single-band lists into a master source table
         master_table = source_tables['i']
-        for band in ['ha', 'r', 'r2', 'g', 'u']:
+        for band in self.frames.keys():
+            if band == 'i':
+                continue  # i is the master
             current_coordinates = SkyCoord(master_table['ra']*u.deg, master_table['dec']*u.deg)
             new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
             idx, sep2d, dist3d = new_coordinates.match_to_catalog_sky(current_coordinates)
@@ -581,14 +582,14 @@ class VphasFrameCatalogue(object):
             Table containing the band-merged catalogue.
         """
         log.info('{0}: started creating a catalogue for ccd {1}'.format(self.fieldname, self.ccd))
-        for img in self.frames:
-            img.populate_cache()
+        for band in self.frames:
+            self.frames[band].populate_cache()
         source_table = self.create_master_source_table()
         source_table.write(os.path.join(self._workdir, self.name+'-sourcelist.fits'))
 
         jobs = []
-        for img in self.frames:
-            params = {'image': img,
+        for band in self.frames:
+            params = {'image': self.frames[band],
                       'ra': source_table['ra'],
                       'dec': source_table['dec'],
                       'workdir': self._workdir}
@@ -599,15 +600,16 @@ class VphasFrameCatalogue(object):
         merged = table.hstack(tables, metadata_conflicts='silent')
         merged['field'] = self.fieldname
         merged['ccd'] = self.ccd
-        merged['umg'] = merged['u'] - merged['g']
-        merged['gmr'] = merged['g'] - merged['r']
         merged['rmi'] = merged['r'] - merged['i']
         merged['rmha'] = merged['r'] - merged['ha']
-        merged['a10'] = (merged['u10sig'].filled(False)
-                         & merged['g10sig'].filled(False)
-                         & merged['r10sig'].filled(False)
-                         & merged['i10sig'].filled(False)
-                         & merged['ha10sig'].filled(False))
+        if 'u' in merged.colnames:
+            merged['umg'] = merged['u'] - merged['g']
+            merged['gmr'] = merged['g'] - merged['r']
+            merged['a10'] = (merged['u10sig'].filled(False)
+                             & merged['g10sig'].filled(False)
+                             & merged['r10sig'].filled(False)
+                             & merged['i10sig'].filled(False)
+                             & merged['ha10sig'].filled(False))
         output_filename =  os.path.join(self._workdir, self.name+'-catalogue.fits')
         merged.write(output_filename, format='fits')
         # Now make diagnostic plots
@@ -621,17 +623,19 @@ class VphasFrameCatalogue(object):
         fig = pl.figure()
         cols = 3
         rows = 2
-        for idx, img in enumerate(self.frames):
-            hdu = fits.open(os.path.join(self._workdir, img.name+'-psf.fits'))[0]
-            psf = hdu.data[5:-5, 5:-5]
-            ax = fig.add_subplot(rows, cols, idx+1)
-            vmin, vmax = 1., hdu.header['PSFHEIGH']
-            with np.errstate(divide='ignore', invalid='ignore'):
-                ax.imshow(np.log10(psf),
-                          vmin=np.log10(vmin), vmax=np.log10(vmax),
-                          cmap=pl.cm.gist_heat, origin='lower',
-                          interpolation='nearest')
-            ax.set_title(img.band)
+        bandorder = ['u', 'g', 'r2', 'ha', 'r', 'i']
+        for idx, band in enumerate(bandorder):
+            if band in self.frames:
+                hdu = fits.open(os.path.join(self._workdir, self.frames[band].name+'-psf.fits'))[0]
+                psf = hdu.data[5:-5, 5:-5]
+                ax = fig.add_subplot(rows, cols, idx+1)
+                vmin, vmax = 1., hdu.header['PSFHEIGH']
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    ax.imshow(np.log10(psf),
+                              vmin=np.log10(vmin), vmax=np.log10(vmax),
+                              cmap=pl.cm.gist_heat, origin='lower',
+                              interpolation='nearest')
+                ax.set_title(band)
         pl.suptitle('DAOPHOT PSF: '+self.name)
         fig.tight_layout()
         plot_filename = os.path.join(self._workdir, self.name+'-psf.jpg')
@@ -644,38 +648,40 @@ class VphasFrameCatalogue(object):
         # Save the images as quicklook jpg
         fig = pl.figure(figsize=(16, 9))
         cols = 6
-        rows = 2        
-        for idx, img in enumerate(self.frames):
-            vmin = np.percentile(img.hdu.data, 2)
-            vmax = vmin + 50
-            subimg = fits.open(os.path.join(self._workdir, img.name+'-sub.fits'))
+        rows = 2
+        bandorder = ['u', 'g', 'r2', 'ha', 'r', 'i']
+        for idx, band in enumerate(bandorder):
+            if band in self.frames:
+                vmin, vmax = np.percentile(self.frames[band].hdu.data, [2, 99])
+                #vmax = vmin + 50
+                subimg = fits.open(os.path.join(self._workdir, self.frames[band].name+'-sub.fits'))
 
-            with np.errstate(divide='ignore', invalid='ignore'):
-                image_data = np.log10(img.hdu.data[::2, ::2])
-                subtracted_data = np.log10(subimg[0].data[::2, ::2])
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    image_data = np.log10(self.frames[band].hdu.data[::2, ::2])
+                    subtracted_data = np.log10(subimg[0].data[::2, ::2])
 
-                ax = fig.add_subplot(rows, cols, idx+1)
-                ax.imshow(image_data,
-                          vmin=np.log10(vmin), vmax=np.log10(vmax),
-                          cmap=pl.cm.gist_heat, origin='lower',
-                          interpolation='nearest')
-                ax.set_title(img.name)
-                ax.axis('off')
-                ax = fig.add_subplot(rows, cols, idx+1+cols)
-                ax.imshow(subtracted_data,
-                          vmin=np.log10(vmin), vmax=np.log10(vmax),
-                          cmap=pl.cm.gist_heat, origin='lower',
-                          interpolation='nearest')
-                ax.axis('off')
-                # Make two standalone jpgs while at it
-                imsave_filename = os.path.join(self._workdir, img.name+'-ccd.jpg')
-                mimg.imsave(imsave_filename, image_data,
-                            vmin=np.log10(vmin), vmax=np.log10(vmax),
-                            cmap=pl.cm.gist_heat, origin='lower')
-                sub_imsave_filename = os.path.join(self._workdir, img.name+'-ccd-sub.jpg')
-                mimg.imsave(sub_imsave_filename, subtracted_data,
-                            vmin=np.log10(vmin), vmax=np.log10(vmax),
-                            cmap=pl.cm.gist_heat, origin='lower')        
+                    ax = fig.add_subplot(rows, cols, idx+1)
+                    ax.imshow(image_data,
+                              vmin=np.log10(vmin), vmax=np.log10(vmax),
+                              cmap=pl.cm.gist_heat, origin='lower',
+                              interpolation='nearest')
+                    ax.set_title(self.frames[band].name)
+                    ax.axis('off')
+                    ax = fig.add_subplot(rows, cols, idx+1+cols)
+                    ax.imshow(subtracted_data,
+                              vmin=np.log10(vmin), vmax=np.log10(vmax),
+                              cmap=pl.cm.gist_heat, origin='lower',
+                              interpolation='nearest')
+                    ax.axis('off')
+                    # Make two standalone jpgs while at it
+                    imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd.jpg')
+                    mimg.imsave(imsave_filename, image_data,
+                                vmin=np.log10(vmin), vmax=np.log10(vmax),
+                                cmap=pl.cm.gist_heat, origin='lower')
+                    sub_imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd-sub.jpg')
+                    mimg.imsave(sub_imsave_filename, subtracted_data,
+                                vmin=np.log10(vmin), vmax=np.log10(vmax),
+                                cmap=pl.cm.gist_heat, origin='lower')        
         fig.tight_layout()
         plot_filename = os.path.join(self._workdir, self.fieldname+'-sub.jpg')
         fig.savefig(plot_filename, dpi=120)
@@ -699,8 +705,16 @@ class VphasOffsetPointing(object):
         self.kwargs = kwargs
 
     @timed
-    def create_catalogue(self, ccdlist=range(1, 33)):
+    def create_catalogue(self, ccdlist=range(1, 33), include_ugr=True):
         """Main function to create the catalogue.
+
+        Parameters
+        ----------
+        ccdlist : list of ints (optional)
+            Specify the HDU extension numbers to use. (default: all CCDs)
+
+        include_ugr : bool (optional)
+            Include ugr (blue concat) data if available? (default: True)
 
         Returns
         -------
@@ -712,16 +726,18 @@ class VphasOffsetPointing(object):
         except NotObservedException as e:
             log.error(e.message)
             return
-        # We can tolerate the blue data missing
-        try:
-            image_filenames = np.concatenate((self.get_blue_filenames(), image_filenames))
-        except NotObservedException as e:
-            log.warning(e.message)
-        log.debug('{0}: filenames: {1}'.format(self.pointing_name, image_filenames))
+        if include_ugr:
+            try:
+                image_filenames.update(self.get_blue_filenames())
+            except NotObservedException as e:
+                log.warning(e.message)  # We can tolerate the blue data missing
+        log.debug('{0}: {1}'.format(self.pointing_name, image_filenames))
         # Having obtained the filenames, start computing!
         framecats = []
         for ccd in ccdlist:
-            frames = [VphasFrame(fn, ccd, **self.kwargs) for fn in image_filenames]
+            frames = {}
+            for band, fn in image_filenames.iteritems():
+                frames[band] = VphasFrame(fn, ccd, **self.kwargs)
             vfc = VphasFrameCatalogue(frames, ccd=ccd)
             framecats.append(vfc.create_catalogue())
         catalogue = table.vstack(framecats, metadata_conflicts='silent')
@@ -751,8 +767,10 @@ class VphasOffsetPointing(object):
             raise NotObservedException('{0} has not been observed in the red filters'.format(self.fieldname))
         offset2idx = {'a': 0, 'b': -1, 'c': 1}
         offset = offset2idx[self.pointing_name[-1:]]
-        result = []
-        for filtername in ['NB_659', 'r_SDSS', 'i_SDSS']:
+        # Define the colloquial band names used in the catalogue
+        filter2band = {'NB_659': 'ha', 'r_SDSS': 'r', 'i_SDSS': 'i'}
+        result = {}
+        for filtername, bandname in filter2band.iteritems():
             mask = ((metadata['Field_1'] == fieldname)
                     & (metadata['filter'] == filtername))
             filenames = metadata['image file'][mask]
@@ -761,7 +779,7 @@ class VphasOffsetPointing(object):
             else:
                 assert len(filenames) == 2  # sanity check
             filenames.sort()
-            result.append(filenames[offset])
+            result[bandname] = filenames[offset]
         return result
 
     def get_blue_filenames(self):
@@ -788,15 +806,17 @@ class VphasOffsetPointing(object):
             raise NotObservedException('{0} has not been observed in the blue filters'.format(self.fieldname))
         offset2idx = {'a': 0, 'b': -1, 'c': 1}
         offset = offset2idx[self.pointing_name[-1:]]
-        result = []
-        for filtername in ['u_SDSS', 'g_SDSS', 'r_SDSS']:
+        # Define the colloquial band names used in the catalogue
+        filter2band = {'u_SDSS': 'u', 'g_SDSS': 'g', 'r_SDSS': 'r2'}
+        result = {}
+        for filtername, bandname in filter2band.iteritems():
             mask = ((metadata['Field_1'] == fieldname)
                     & (metadata['filter'] == filtername))
             filenames = metadata['image file'][mask]
             if filtername != 'g_SDSS':
                 assert len(filenames) == 2  # sanity check
             filenames.sort()
-            result.append(filenames[offset])
+            result[bandname] = filenames[offset]
         return result
 
 
