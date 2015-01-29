@@ -3,6 +3,7 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 import os
+import re
 import shutil
 import warnings
 import tempfile
@@ -57,7 +58,7 @@ class Daophot(object):
 
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
                     fitsky='yes', function='moffat25', fwhmpsf=3., itime=10.,
-                    maxiter=50, maxnpsf=30, mergerad_fwhm=2., nclean=5,
+                    maxiter=50, mergerad_fwhm=2., nclean=10,
                     psfrad_fwhm=10., ratio=1., theta=0., readnoi=0, sigma=5.,
                     threshold=3., recenter='yes', varorder=1, zmag=20.):
         """Sets the IRAF/DAOPHOT configuration parameters.
@@ -78,15 +79,12 @@ class Daophot(object):
 
         maxiter : int
 
-        maxnpsf : int
-            The maximum number of candidate psf stars to be selected.
-
         mergerad_fwhm : float (optional)
             Use 0 to disable source merging during PSF fitting.
 
         nclean: int
             Number of passes used to clean the PSF from bad pixels, neighbours,
-            etc. The DAOPHOT manual recommends 5 passes. (default: 5)
+            etc. The DAOPHOT manual recommends 5 passes. (default: 10)
 
         psfrad_fwhm : float
              Radius of psf model. Must be somewhat larger than fitrad.
@@ -152,7 +150,6 @@ class Daophot(object):
         iraf.daopars.saturated = 'yes'  # This appears to improve the wings
         iraf.daopars.maxiter = maxiter
         iraf.daopars.function = function
-        iraf.pstselect.maxnpsf = maxnpsf
         iraf.findpars.threshold = threshold
 
     def psf_photometry(self):
@@ -224,11 +221,14 @@ class Daophot(object):
         iraf.daophot.phot(**phot_args)
 
     @timed
-    def psf(self, failsafe=True):
+    def psf(self, maxnpsf=50, failsafe=True):
         """Runs the DAOPHOT PSF model fitting task.
 
         Parameters
         ----------
+        maxnpsf : int
+            The maximum number of candidate psf stars to be selected.
+
         failsafe : bool
             If true and the PSF fitting fails to converge, then re-try the fit
             automatically with varorder = 0 and function = 'auto'.
@@ -243,6 +243,7 @@ class Daophot(object):
                               image=self._path_cache['image_path'],
                               photfile=self._path_cache['apphot_output'],
                               pstfile=self._path_cache['pstselect_output'],
+                              maxnpsf=maxnpsf,
                               verify='no',
                               interactive='no',
                               verbose='yes',
@@ -256,6 +257,7 @@ class Daophot(object):
                                                       'output-psg.txt')
         self._path_cache['psf_pst_output'] = os.path.join(self._workdir,
                                                           'output-psf-pst.txt')
+        path_psf_log = os.path.join(self._workdir, 'log-psf.txt')
         psf_args = dict(image=self._path_cache['image_path'],
                         photfile=self._path_cache['apphot_output'],
                         psfimage=self._path_cache['psf_output'],
@@ -266,26 +268,38 @@ class Daophot(object):
                         interactive='no',
                         cache='yes',
                         verbose='yes',
-                        Stdout=str(os.path.join(self._workdir,
-                                                'log-psf.txt')))
+                        Stdout=str(path_psf_log))
         iraf.daophot.psf(**psf_args)
+
+        # Verify the success of the fit
+        logfile = open(path_psf_log, 'r')
+        norm_scatter = float(re.findall("norm scatter: ([\d\.]+)", logfile.read())[0])
+        logfile.close()
+        log.debug('DAOPHOT PSF norm scatter: {0}'.format(norm_scatter))
+        if failsafe and (norm_scatter > 0.1) and os.path.exists(self._path_cache['psf_output'] + '.fits'):
+            # It's important to remove the PSF output file,
+            # otherwise DAOPHOT will add an extension to it on the 2nd iteration
+            os.remove(self._path_cache['psf_output'] + '.fits')
 
         # It is possible for iraf.daophot.psf() to fail to converge.
         # In this case, we re-try with more easy-to-fit settings.
-        if failsafe and not os.path.exists(self._path_cache['psf_output'] + '.fits'):
+        if not os.path.exists(self._path_cache['psf_output'] + '.fits'):
             log.warning('iraf.daophot.psf appears to have failed; '
                         'now trying again in failsafe mode.')
             tmp_varorder = iraf.daopars.varorder
             tmp_function = iraf.daopars.function
-            tmp_maxnpsf = iraf.pstselect.maxnpsf
+            tmp_nclean = iraf.daopars.nclean
             iraf.daopars.varorder = 0
             iraf.daopars.function = 'auto'
-            iraf.pstselect.maxnpsf = tmp_maxnpsf * 2
+            iraf.daopars.nclean = tmp_nclean * 2
+            # Run pstselect & psf again
+            pstselect_args['maxnpsf'] = maxnpsf * 2
+            iraf.daophot.pstselect(**pstselect_args)
             iraf.daophot.psf(**psf_args)
             # Restore the original configuration
             iraf.daopars.varorder = tmp_varorder
             iraf.daopars.function = tmp_function
-            iraf.pstselect.maxnpsf = tmp_maxnpsf
+            iraf.daopars.nclean = tmp_nclean
 
         # Save the resulting PSF into a user-friendly FITS file
         self._path_cache['seepsf_output'] = os.path.join(self._workdir, 'output-seepsf')  # daophot will append .fits
@@ -379,3 +393,11 @@ class Daophot(object):
     def get_subimage(self):
         fitsobj = fits.open(self._path_cache['subimage_output'] + '.fits')
         return fitsobj
+
+    @property
+    def seepsf_path(self):
+        return self._path_cache['seepsf_output'] + '.fits'
+
+    @property
+    def subimagef_path(self):
+        return self._path_cache['subimage_output'] + '.fits'

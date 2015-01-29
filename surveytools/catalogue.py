@@ -67,7 +67,6 @@ from .utils import cached_property, timed
 ###########
 
 WORKDIR_DEFAULT = '/home/gb/tmp/vphas-workdir'  # Where can we store temporary files?
-USE_MULTIPROCESSING = True
 # Directory containing the calibration frames (confmaps and flat fields)
 DATAPATH = '/home/gb/tmp/vphasdisk'
 CALIBDIR = os.path.join(DATAPATH, 'calib')
@@ -111,7 +110,7 @@ class VphasFrame(object):
         else:
             raise IOError('File not found:' + os.path.join(datadir, filename))
         self.orig_extension = extension
-        self._workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension), dir=workdir)
+        self.workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension), dir=workdir)
         self._cache = {}
         self.confidence_threshold = confidence_threshold
         self.filename, self.extension = self._preprocess_image(subtract_sky=subtract_sky)
@@ -123,7 +122,7 @@ class VphasFrame(object):
     def __getstate__(self):
         """Prepare the object before pickling (serialization)."""
         # Pickle does not like serializing `astropy.io.fits.hdu` objects
-        for key in ['hdu', 'confidence_map_hdu']:
+        for key in ['hdu', 'daophot']:
             try:
                 del self._cache[key]
             except KeyError:
@@ -159,7 +158,7 @@ class VphasFrame(object):
         if mask_bad_pixels:
             imgdata[bad_pixel_mask] = -1
         # Estimate the background
-        bg = Background(imgdata, (41, 64), filter_shape=(3, 2),
+        bg = Background(imgdata, (41, 64), filter_shape=(2, 2),
                                      mask=bad_pixel_mask, method='median',
                                      sigclip_sigma=3., sigclip_iters=5)
         log.debug('{0} sky estimate = {1:.1f} +/- {2:.1f}'.format(fltr, bg.background_median, bg.background_rms_median))
@@ -170,13 +169,13 @@ class VphasFrame(object):
             # ensure the median level remains the same
             imgdata = imgdata - (bg.background - bg.background_median)
         # Write the sky-subtracted, bad-pixel-masked image to a new FITS file which IRAF can understand
-        path = os.path.join(self._workdir, '{0}.fits'.format(fltr))
+        path = os.path.join(self.workdir, '{0}.fits'.format(fltr))
         log.debug('Writing background-subtracted image to {0}'.format(path))
         newhdu = fits.PrimaryHDU(imgdata, hdu.header)
         newhdu.header.extend(fts[0].header, unique=True)
         newhdu.writeto(path)
         # Also write the background frame
-        self.background_path = os.path.join(self._workdir, '{0}-bg.fits'.format(fltr))
+        self.background_path = os.path.join(self.workdir, '{0}-bg.fits'.format(fltr))
         log.debug('Writing background image to {0}'.format(self.background_path))
         newhdu = fits.PrimaryHDU(bg.background, hdu.header)
         newhdu.writeto(self.background_path)
@@ -388,7 +387,7 @@ class VphasFrame(object):
         # pyraf will complain over a negative theta
         if theta < 0:
             theta += 180
-        log.info(self.band+' PSF FWHM = {0:.1f}px; ratio = {1:.1f}; theta = {2:.1f}'.format(fwhm, ratio, theta))
+        log.debug(self.band+' PSF FWHM = {0:.1f}px; ratio = {1:.1f}; theta = {2:.1f}'.format(fwhm, ratio, theta))
         self._cache['psf_fwhm'] = fwhm
         self._cache['psf_ratio'] = ratio
         self._cache['psf_theta'] = theta
@@ -397,9 +396,9 @@ class VphasFrame(object):
     def daophot(self, **kwargs):
         """Returns a Daophot object, pre-configured to work on the image."""
         image_path = '{0}[{1}]'.format(self.filename, self.extension)
-        log.debug('{0}: initiating daophot session for file {1}'.format(self.band, image_path))
+        log.debug('{0}: starting a new daophot session for file {1}'.format(self.band, image_path))
         from .daophot import Daophot
-        dp = Daophot(image_path, workdir=self._workdir,
+        dp = Daophot(image_path, workdir=self.workdir,
                      datamin=self.datamin, datamax=self.datamax,
                      epadu=self.gain, fwhmpsf=self.psf_fwhm,
                      itime=self.exposure_time,
@@ -450,13 +449,22 @@ class VphasFrame(object):
         col_x = Column(name='XCENTER', data=x)
         col_y = Column(name='YCENTER', data=y)
         coords_tbl = Table([col_x, col_y])
-        coords_tbl_filename = os.path.join(self._workdir, 'coords-tbl.txt')
+        coords_tbl_filename = os.path.join(self.workdir, 'coords-tbl.txt')
         coords_tbl.write(coords_tbl_filename, format='ascii')
         # Now run daophot
         dp = self.daophot(**kwargs)
-        dp.apphot(coords=coords_tbl_filename)
+
+        # First, create a proper PSF based on the daofind source list
+        # Using the master source list to compute the PSF is dangerous,
+        # because it might include the odd spurious object
+        dp.daofind()
+        dp.apphot()
         dp.psf()
+
+        dp.apphot(coords=coords_tbl_filename)
+        #dp.psf()
         dp.allstar()
+
         tbl = dp.get_allstar_phot_table()
         tbl.meta['band'] = self.band
         # Add celestial coordinates ra/dec as columns
@@ -520,27 +528,25 @@ class VphasFrameCatalogue(object):
         the 32-CCD multi-extension FITS images produced by the camera.
     """
 
-    def __init__(self, frames, ccd=1, workdir=WORKDIR_DEFAULT):
+    def __init__(self, frames, ccd, workdir, cpufarm=None):
         self.frames = frames
         self.fieldname = self.frames['i'].name.split('-')[0]
         self.ccd = ccd
+        self.workdir = workdir
         self.name = '{0}-{1}'.format(self.fieldname, self.ccd)
-        # Setup the working directory to store temporary files
-        self._workdir = tempfile.mkdtemp(prefix=self.name+'-', dir=workdir)
-        log.info('Storing results in {0}'.format(self._workdir))
         # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
-        if USE_MULTIPROCESSING:
-            self.cpufarm = multiprocessing.Pool(len(self.frames))
-        else:
+        if cpufarm is None:
             self.cpufarm = itertools  # Simple sequential processing
+        else:
+            self.cpufarm = cpufarm
 
     def __del__(self):
         """Destructor; cleans up the temporary directory."""
-        #shutil.rmtree(self._workdir)
+        #shutil.rmtree(self.workdir)
         # Make sure to get rid of any multiprocessing-forked processes;
         # they might be eating up a lot of memory!
-        if type(self.cpufarm) is multiprocessing.pool.Pool:
-            self.cpufarm.terminate()
+        #if type(self.cpufarm) is multiprocessing.pool.Pool:
+        #    self.cpufarm.terminate()
         pass
 
     def create_master_source_table(self):
@@ -574,14 +580,14 @@ class VphasFrameCatalogue(object):
         """
         log.info('{0}: started creating a catalogue for ccd {1}'.format(self.fieldname, self.ccd))
         source_table = self.create_master_source_table()
-        source_table.write(os.path.join(self._workdir, self.name+'-sourcelist.fits'))
+        source_table.write(os.path.join(self.workdir, self.name+'-sourcelist.fits'))
 
         jobs = []
         for band in self.frames:
             params = {'image': self.frames[band],
                       'ra': source_table['ra'],
                       'dec': source_table['dec'],
-                      'workdir': self._workdir}
+                      'workdir': self.workdir}
             jobs.append(params)
 
         tables = [tbl for tbl in self.cpufarm.imap(compute_photometry_task, jobs)]
@@ -599,7 +605,7 @@ class VphasFrameCatalogue(object):
                              & merged['r10sig'].filled(False)
                              & merged['i10sig'].filled(False)
                              & merged['ha10sig'].filled(False))
-        output_filename =  os.path.join(self._workdir, self.name+'-catalogue.fits')
+        output_filename =  os.path.join(self.workdir, self.name+'-catalogue.fits')
         merged.write(output_filename, format='fits')
         # Now make diagnostic plots
         self.plot_psf()
@@ -617,7 +623,7 @@ class VphasFrameCatalogue(object):
         bandorder = ['u', 'g', 'r2', 'ha', 'r', 'i']
         for idx, band in enumerate(bandorder):
             if band in self.frames:
-                hdu = fits.open(os.path.join(self._workdir, self.frames[band].name+'-psf.fits'))[0]
+                hdu = fits.open(os.path.join(self.workdir, self.frames[band].name+'-psf.fits'))[0]
                 psf = hdu.data[5:-5, 5:-5]
                 ax = fig.add_subplot(rows, cols, idx+1)
                 vmin, vmax = 1., hdu.header['PSFHEIGH']
@@ -630,7 +636,7 @@ class VphasFrameCatalogue(object):
         pl.suptitle('DAOPHOT PSF: '+self.name)
         fig.tight_layout()
         log.debug('Writing {0}'.format(output_fn))
-        plot_filename = os.path.join(self._workdir, output_fn)
+        plot_filename = os.path.join(self.workdir, output_fn)
         fig.savefig(plot_filename, dpi=120)
         pl.close(fig)
 
@@ -656,7 +662,7 @@ class VphasFrameCatalogue(object):
 
                 with np.errstate(divide='ignore', invalid='ignore'):
                     image_data = np.log10(self.frames[band].hdu.data[::sampling, ::sampling])
-                    subimg = fits.open(os.path.join(self._workdir, self.frames[band].name+'-sub.fits'))
+                    subimg = fits.open(os.path.join(self.workdir, self.frames[band].name+'-sub.fits'))
                     subtracted_data = np.log10(subimg[0].data[::sampling, ::sampling])
 
                     ax = fig.add_subplot(rows, cols, idx+1)
@@ -668,27 +674,27 @@ class VphasFrameCatalogue(object):
                     ax.axis('off')
                     # Make standalone jpgs while at it
                     # Original image
-                    imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd.jpg')
+                    imsave_filename = os.path.join(self.workdir, self.frames[band].name+'-ccd.jpg')
                     orig_data = self.frames[band].orig_hdu.data[::sampling, ::sampling]
                     orig_vmin, orig_vmax = np.percentile(orig_data, [2, 99])
                     mimg.imsave(imsave_filename, np.log10(orig_data),
                                 vmin=np.log10(orig_vmin), vmax=np.log10(orig_vmax),
                                 cmap=pl.cm.gist_heat, origin='lower')
                     # Background image
-                    background_fn = os.path.join(self._workdir, self.frames[band].name+'-ccd-bg.jpg')
+                    background_fn = os.path.join(self.workdir, self.frames[band].name+'-ccd-bg.jpg')
                     bg_data = self.frames[band].background_hdu.data[::sampling, ::sampling]
                     mimg.imsave(background_fn, np.log10(bg_data),
                                 vmin=np.log10(orig_vmin), vmax=np.log10(orig_vmax),
                                 cmap=pl.cm.gist_heat, origin='lower')                 
                     # Sky-subtracted image
-                    imsave_filename = os.path.join(self._workdir,
+                    imsave_filename = os.path.join(self.workdir,
                                                    self.frames[band].name+'-ccd-nosky.jpg')
                     mimg.imsave(imsave_filename, image_data, **imgstyle)
                     # PSF-subtracted image
-                    sub_imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd-nostars.jpg')
+                    sub_imsave_filename = os.path.join(self.workdir, self.frames[band].name+'-ccd-nostars.jpg')
                     mimg.imsave(sub_imsave_filename, subtracted_data, **imgstyle)      
         fig.tight_layout()
-        plot_filename = os.path.join(self._workdir, self.fieldname+'-sub.jpg')
+        plot_filename = os.path.join(self.workdir, self.fieldname+'-sub.jpg')
         fig.savefig(plot_filename, dpi=120)
         pl.close(fig)
 
@@ -703,14 +709,27 @@ class VphasOffsetPointing(object):
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
     """
-    def __init__(self, pointing_name, **kwargs):
+    def __init__(self, pointing_name, use_multiprocessing=True, **kwargs):
         if len(pointing_name) != 5 or not pointing_name.endswith(('a', 'b', 'c')):
             raise ValueError('Illegal pointing name. Expected a string of the form "0001a".')
         self.pointing_name = pointing_name
         self.kwargs = kwargs
+        # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
+        if use_multiprocessing:
+            self.cpufarm = multiprocessing.Pool()
+        else:
+            self.cpufarm = itertools  # Simple sequential processing
+
+    def __del__(self):
+        """Destructor."""
+        #shutil.rmtree(self.workdir)
+        # Make sure to get rid of any multiprocessing-forked processes;
+        # they might be eating up a lot of memory!
+        if type(self.cpufarm) is multiprocessing.pool.Pool:
+            self.cpufarm.terminate()
 
     @timed
-    def create_catalogue(self, ccdlist=range(1, 33), include_ugr=True):
+    def create_catalogue(self, ccdlist=range(1, 33), include_ugr=True, workdir=WORKDIR_DEFAULT):
         """Main function to create the catalogue.
 
         Parameters
@@ -738,23 +757,28 @@ class VphasOffsetPointing(object):
                 log.warning(e.message)  # We can tolerate the blue data missing
         log.debug('{0}: using the following files: {1}'.format(self.pointing_name, image_filenames))
         # Having obtained the filenames, start computing!
-        import multiprocessing
-        pool = multiprocessing.Pool(len(image_filenames))
-
         framecats = []
         for ccd in ccdlist:
+            # Setup the working directory to store temporary files
+            ccd_workdir = tempfile.mkdtemp(prefix='{0}-{1}-'.format(self.pointing_name, ccd), dir=workdir)
+            log.info('{0}-{1}: started preparing the data'.format(self.pointing_name, ccd))
+            log.info('{0}-{1}: working directory: {2}'.format(self.pointing_name, ccd, ccd_workdir))
+
             jobs = []
             for fn in image_filenames.values():
                 params = {'filename': fn,
                           'extension': ccd,
+                          'workdir': ccd_workdir,
                           'kwargs': self.kwargs}
                 jobs.append(params)
             frames = {}
-            for frame in pool.imap(init_vphasframe, jobs):
+            for frame in self.cpufarm.imap(create_vphasframe_task, jobs):
                 frames[frame.band] = frame
-            pool.terminate()
-            vfc = VphasFrameCatalogue(frames, ccd=ccd)
+            vfc = VphasFrameCatalogue(frames, ccd=ccd, workdir=ccd_workdir, cpufarm=self.cpufarm)
             framecats.append(vfc.create_catalogue())
+
+            import gc
+            log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
 
         catalogue = table.vstack(framecats, metadata_conflicts='silent')
         return catalogue
@@ -841,30 +865,36 @@ class VphasOffsetPointing(object):
 ############
 
 # Define function for parallel processing
+def create_vphasframe_task(params):
+    """Returns a `VphasFrame` instance for a given FITS filename/extension.
+
+    This is defined as a separate function to allow pickling for multiprocessing.
+    """
+    log.debug('Creating a VphasFrame instance for {0}[{1}]'.format(params['filename'], params['extension']))
+    frame = VphasFrame(params['filename'], params['extension'], workdir=params['workdir'], **params['kwargs'])
+    frame.populate_cache()
+    return frame
+
 def compute_source_table_task(image):
     # 4 sigma is recommended by the DAOPHOT manual, but 3-sigma
     # does appear to recover a bunch more genuine sources at SNR > 5.
     thresholds = {'u':5, 'g':5, 'r2':5, 'ha':5, 'r':5, 'i':3}
+    # the psfrad and maxiter parameters were carefully chosen to speed
+    # up source detection; psfrad_fwhm should be bigger for good photometry
     tbl = image.compute_source_table(psfrad_fwhm=3., maxiter=20,
-                                      threshold=thresholds[image.band])
+                                     threshold=thresholds[image.band])
     del image
     return tbl
 
 def compute_photometry_task(params):
     tbl = params['image'].compute_photometry(params['ra'], params['dec'],
                                              psfrad_fwhm=10., maxiter=10,
-                                             mergerad_fwhm=0)
+                                             threshold=5, mergerad_fwhm=0)
     # Save the psf and subtracted images
     dp = params['image']._cache['daophot']
     psf_filename = os.path.join(params['workdir'], params['image'].name+'-psf.fits')
     dp.get_psf().writeto(psf_filename)
     sub_filename = os.path.join(params['workdir'], params['image'].name+'-sub.fits')
     dp.get_subimage().writeto(sub_filename)
-    del dp
-    return tbl
+    return (tbl, dp)
 
-def init_vphasframe(params):
-    log.debug('Creating a VphasFrame instance for {0}[{1}]'.format(params['filename'], params['extension']))
-    frame = VphasFrame(params['filename'], params['extension'], **params['kwargs'])
-    frame.populate_cache()
-    return frame
