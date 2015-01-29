@@ -53,9 +53,11 @@ class Daophot(object):
         """Destructor; cleans up the temporary directory."""
         pass #shutil.rmtree(self._workdir)
 
-    def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1., fitsky='yes', function='moffat25', fwhmpsf=3., itime=10., maxiter=50,
-                    maxnpsf=25, mergerad_fwhm=2., nclean=5, psfrad_fwhm=10., ratio=1., theta=0., readnoi=0, sigma=5., threshold=3.,
-                    recenter='yes', varorder=1, zmag=20.):
+    def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
+                    fitsky='yes', function='moffat25', fwhmpsf=3., itime=10.,
+                    maxiter=50, maxnpsf=30, mergerad_fwhm=2., nclean=5,
+                    psfrad_fwhm=10., ratio=1., theta=0., readnoi=0, sigma=5.,
+                    threshold=3., recenter='yes', varorder=1, zmag=20.):
         """Sets the IRAF/DAOPHOT configuration parameters.
 
         Parameters
@@ -250,11 +252,17 @@ class Daophot(object):
         if failsafe and not os.path.exists(self._path_cache['psf_output'] + '.fits'):
             log.warning('iraf.daophot.psf appears to have failed; '
                         'now trying again in failsafe mode.')
-            tmp_varorder, tmp_function = iraf.daopars.varorder, iraf.daopars.function
+            tmp_varorder = iraf.daopars.varorder
+            tmp_function = iraf.daopars.function
+            tmp_maxnpsf = iraf.pstselect.maxnpsf
             iraf.daopars.varorder = 0
             iraf.daopars.function = 'auto'
+            iraf.pstselect.maxnpsf = tmp_maxnpsf * 2
             iraf.daophot.psf(**psf_args)
-            iraf.daopars.varorder, iraf.daopars.function = tmp_varorder, tmp_function
+            # Restore the original configuration
+            iraf.daopars.varorder = tmp_varorder
+            iraf.daopars.function = tmp_function
+            iraf.pstselect.maxnpsf = tmp_maxnpsf
 
         # Save the resulting PSF into a user-friendly FITS file
         self._path_cache['seepsf_output'] = os.path.join(self._workdir, 'output-seepsf')  # daophot will append .fits
