@@ -105,17 +105,16 @@ class VphasFrame(object):
     def __init__(self, filename, extension=0, confidence_threshold=80.,
                  subtract_sky=True, datadir=DATADIR_DEFAULT, workdir=WORKDIR_DEFAULT):
         if os.path.exists(filename):
-            self.filename = filename
+            self.orig_filename = filename
         elif os.path.exists(os.path.join(datadir, filename)):
-            self.filename = os.path.join(datadir, filename)
+            self.orig_filename = os.path.join(datadir, filename)
         else:
             raise IOError('File not found:' + os.path.join(datadir, filename))
+        self.orig_extension = extension
         self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=workdir)
         self._cache = {}
-        self.extension = extension
         self.confidence_threshold = confidence_threshold
-        self._preprocess_image(subtract_sky=subtract_sky)
-
+        self.filename, self.extension = self._preprocess_image(subtract_sky=subtract_sky)
 
     def __del__(self):
         #del self._cache['daophot']
@@ -131,7 +130,8 @@ class VphasFrame(object):
                 pass
         return self.__dict__
 
-    def _preprocess_image(self, subtract_sky=False):
+    @timed
+    def _preprocess_image(self, subtract_sky=True, mask_bad_pixels=True):
         """Save the image to FITS file which can be understood by IRAF.
 
         IRAF/DAOPHOT does not appears to support RICE-compressed files,
@@ -141,25 +141,42 @@ class VphasFrame(object):
         analysis by IRAF tasks.
 
         In addition, this step allows large-scale structures in the sky
-        background to be subtracted.""" 
-        fts = fits.open(self.filename)
-        imgdata = fts[self.extension].data
+        background to be subtracted.
+
+        Returns
+        -------
+        (filename, extension)
+            Of the newly created pre-processed frame.
+        """ 
+        fts = fits.open(self.orig_filename)
+        hdu = fts[self.orig_extension]
+        fltr = fts[0].header['ESO INS FILT1 NAME']
+        imgdata = hdu.data
+        # Create bad pixel mask
+        self.confidence_map_path = os.path.join(CALIBDIR, hdu.header['CIR_CPM'].split('[')[0])
+        confmap_hdu = fits.open(self.confidence_map_path)[self.orig_extension]
+        bad_pixel_mask = confmap_hdu.data < self.confidence_threshold
+        if mask_bad_pixels:
+            imgdata[bad_pixel_mask] = -1
+        # Estimate the background
+        bg = Background(imgdata, (41, 64), filter_shape=(1, 1),
+                        mask=bad_pixel_mask, method='median',
+                        sigclip_sigma=3., sigclip_iters=5)
+        log.debug('{0} sky estimate = {1:.1f} +/- {2:.1f}'.format(fltr, bg.background_median, bg.background_rms_median))
+        self.sky = bg.background_median
+        self.sky_sigma = bg.background_rms_median
+        # Subtract the background
         if subtract_sky:
-            bg = Background(imgdata, (41, 64), filter_shape=(3, 3), method='median')
+            # ensure the median level remains the same
             imgdata = imgdata - (bg.background - bg.background_median)
-        
-        # TODO: include pixel mask when subtracting background
-        # TODO: FIX BAD PIXEL MASKING!!
-        #imgdata[self.bad_pixel_mask] = self.datamin - 1
-        newhdu = fits.PrimaryHDU(imgdata, fts[self.extension].header)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message='(.*)FITS standard(.*)')
+        # Write the sky-subtracted, bad-pixel-masked image to a new FITS file which IRAF can understand
+        path = os.path.join(self._workdir, '{0}.fits'.format(fltr))
+        log.info('Writing sky-subtracted image to {0}'.format(path))
+        newhdu = fits.PrimaryHDU(imgdata, hdu.header)
         newhdu.header.extend(fts[0].header, unique=True)
-        nosky_path = os.path.join(self._workdir, '{0}.fits'.format(fts[0].header['ESO INS FILT1 NAME']))
-        newhdu.writeto(nosky_path)
-        log.info('Writing sky-subtracted image to {0}'.format(nosky_path))
-        self.filename = nosky_path
-        self.extension = 0
+        newhdu.writeto(path)
+        # Return the pre-processed image filename and extension
+        return (nosky_path, 0)
 
     def populate_cache(self):
         """Populate the cache.
@@ -168,32 +185,22 @@ class VphasFrame(object):
         is serialized and sent off to other nodes, to keep image statistics
         from being re-computed unncessesarily on different nodes.
         """
-        self._estimate_sky()
         self._estimate_psf()
+
+    @property
+    def orig_hdu(self):
+        """Returns the FITS HDU object corresponding to the original image."""
+        return fits.open(self.orig_filename)[self.orig_extension]
 
     @cached_property
     def hdu(self):
-        """FITS HDU object corresponding to the image."""
+        """FITS HDU object corresponding to the measured image (after sky subtraction)."""
         return fits.open(self.filename)[self.extension]
 
     @cached_property
     def header(self):
         """FITS header object."""
         return self.hdu.header
-
-    @cached_property
-    def confidence_map_path(self):
-        """Astronomical target."""
-        return os.path.join(CALIBDIR, self.hdu.header['CIR_CPM'].split('[')[0])
-
-    @cached_property
-    def confidence_map_hdu(self):
-        """Astronomical target."""
-        return fits.open(self.confidence_map_path)[self.extension]
-
-    @property
-    def bad_pixel_mask(self):
-        return self.confidence_map_hdu.data < self.confidence_threshold
 
     @cached_property
     def object(self):
@@ -216,7 +223,7 @@ class VphasFrame(object):
     @cached_property
     def name(self):
         """VPHAS name of the frame, e.g. '0001a-8-r'."""
-        return '{0}-{1}-{2}'.format(self.fieldname, self.extension, self.band)
+        return '{0}-{1}-{2}'.format(self.fieldname, self.orig_extension, self.band)
 
     @cached_property
     def band(self):
@@ -303,24 +310,6 @@ class VphasFrame(object):
         return self.hdu.header['SEEING']  # pixels
 
     @property
-    def sky(self):
-        """Median background level, estimated using sigma-clipping."""
-        try:
-            return self._cache['sky_median']
-        except KeyError:
-            self._estimate_sky()
-            return self._cache['sky_median']   
-
-    @property
-    def sky_sigma(self):
-        """Standard deviation of background, estimated using sigma-clipping."""
-        try:
-            return self._cache['sky_sigma']
-        except KeyError:
-            self._estimate_sky()
-            return self._cache['sky_sigma']   
-
-    @property
     def psf_fwhm(self):
         """The Full-Width-Half-Maximum of a 2D Gaussian PSF model fit."""
         try:
@@ -359,17 +348,6 @@ class VphasFrame(object):
         Use origin=1 if x/y positions were produced by IRAF/DAOPHOT,
         0 if they were produced by astropy."""
         return astropy.wcs.WCS(self.hdu.header).wcs_pix2world(x, y, 1)
-
-    @timed
-    def _estimate_sky(self):
-        """Estimates the median sky level and standard deviation."""
-        from photutils.extern.imageutils.stats import sigma_clipped_stats
-        mean, median, sigma = sigma_clipped_stats(self.hdu.data[~self.bad_pixel_mask], sigma=3.0)
-        log.debug('{0} sky estimate = {1:.1f} +/- {2:.1f}'.format(self.band, median, sigma))
-        self._cache['sky_mean'] = mean
-        self._cache['sky_median'] = median
-        self._cache['sky_sigma'] = sigma
-        del self.hdu.data  # don't keep the data in memory
 
     def _estimate_psf(self, threshold=20.):
         """Fits a 2D Gaussian PSF to the stars in the images.
@@ -550,6 +528,11 @@ class VphasFrameCatalogue(object):
     def __del__(self):
         """Destructor; cleans up the temporary directory."""
         #shutil.rmtree(self._workdir)
+        # Make sure to get rid of any multiprocessing-forked processes;
+        # they might be eating up a lot of memory!
+        if type(self.cpufarm) is multiprocessing.pool.Pool:
+            log.warning('Terminating multiprocessing.pool.Pool')
+            self.cpufarm.terminate()
         pass
 
     def create_master_source_table(self):
@@ -614,12 +597,14 @@ class VphasFrameCatalogue(object):
         merged.write(output_filename, format='fits')
         # Now make diagnostic plots
         self.plot_psf()
-        self.plot_subtracted_images()
+        self.plot_images()
         return merged
 
     @timed
-    def plot_psf(self):
+    def plot_psf(self, output_fn=None):
         """Saves a pretty plot showing the PSF in each band."""
+        if output_fn is None:
+            output_fn = self.name+'-psf.jpg'
         fig = pl.figure()
         cols = 3
         rows = 2
@@ -638,50 +623,54 @@ class VphasFrameCatalogue(object):
                 ax.set_title(band)
         pl.suptitle('DAOPHOT PSF: '+self.name)
         fig.tight_layout()
-        plot_filename = os.path.join(self._workdir, self.name+'-psf.jpg')
+        log.debug('Writing {0}'.format(output_fn))
+        plot_filename = os.path.join(self._workdir, output_fn)
         fig.savefig(plot_filename, dpi=120)
         pl.close(fig)
 
     @timed
-    def plot_subtracted_images(self):
-        """Plots the PSF-subtracted images as JPGs and saves them in the workdir."""
+    def plot_images(self, sampling=2):
+        """Plots the origin, sky-, and psf-subtracted images as JPGs in the workdir.
+
+        Parameters
+        ----------
+        sampling : int (optional)
+           Only sample every Nth pixel when plotting the images. (default: 2)
+        """
         # Save the images as quicklook jpg
         fig = pl.figure(figsize=(16, 9))
         cols = 6
         rows = 2
         bandorder = ['u', 'g', 'r2', 'ha', 'r', 'i']
         for idx, band in enumerate(bandorder):
-            if band in self.frames:
-                vmin, vmax = np.percentile(self.frames[band].hdu.data, [2, 99])
+            if band in self.frames:  # not all bands may be available
+                logvmin, logvmax = np.log10(np.percentile(self.frames[band].hdu.data, [2, 99]))
+                imgstyle = {'cmap': pl.cm.gist_heat, 'origin': 'lower', 'vmin': logvmin, 'vmax': logvmax}
                 #vmax = vmin + 50
-                subimg = fits.open(os.path.join(self._workdir, self.frames[band].name+'-sub.fits'))
 
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    image_data = np.log10(self.frames[band].hdu.data[::2, ::2])
-                    subtracted_data = np.log10(subimg[0].data[::2, ::2])
+                    image_data = np.log10(self.frames[band].hdu.data[::sampling, ::sampling])
+                    subimg = fits.open(os.path.join(self._workdir, self.frames[band].name+'-sub.fits'))
+                    subtracted_data = np.log10(subimg[0].data[::sampling, ::sampling])
 
                     ax = fig.add_subplot(rows, cols, idx+1)
-                    ax.imshow(image_data,
-                              vmin=np.log10(vmin), vmax=np.log10(vmax),
-                              cmap=pl.cm.gist_heat, origin='lower',
-                              interpolation='nearest')
+                    ax.matshow(image_data, **imgstyle)
                     ax.set_title(self.frames[band].name)
                     ax.axis('off')
                     ax = fig.add_subplot(rows, cols, idx+1+cols)
-                    ax.imshow(subtracted_data,
-                              vmin=np.log10(vmin), vmax=np.log10(vmax),
-                              cmap=pl.cm.gist_heat, origin='lower',
-                              interpolation='nearest')
+                    ax.matshow(subtracted_data, **imgstyle)
                     ax.axis('off')
-                    # Make two standalone jpgs while at it
+                    # Make standalone jpgs while at it
                     imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd.jpg')
-                    mimg.imsave(imsave_filename, image_data,
-                                vmin=np.log10(vmin), vmax=np.log10(vmax),
+                    orig_data = self.frames[band].orig_hdu.data[::sampling, ::sampling]
+                    orig_vmin, orig_vmax = np.percentile(orig_data, [2, 99])
+                    mimg.imsave(imsave_filename, np.log10(orig_data),
+                                vmin=np.log10(orig_vmin), vmax=np.log10(orig_vmax),
                                 cmap=pl.cm.gist_heat, origin='lower')
-                    sub_imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd-sub.jpg')
-                    mimg.imsave(sub_imsave_filename, subtracted_data,
-                                vmin=np.log10(vmin), vmax=np.log10(vmax),
-                                cmap=pl.cm.gist_heat, origin='lower')        
+                    imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd-nosky.jpg')
+                    mimg.imsave(imsave_filename, image_data, **imgstyle)
+                    sub_imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd-nostars.jpg')
+                    mimg.imsave(sub_imsave_filename, subtracted_data, **imgstyle)      
         fig.tight_layout()
         plot_filename = os.path.join(self._workdir, self.fieldname+'-sub.jpg')
         fig.savefig(plot_filename, dpi=120)
@@ -829,16 +818,21 @@ def compute_source_table_task(image):
     # 4 sigma is recommended by the DAOPHOT manual, but 3-sigma
     # does appear to recover a bunch more genuine sources at SNR > 5.
     thresholds = {'u':5, 'g':5, 'r2':5, 'ha':5, 'r':5, 'i':3}
-    return image.compute_source_table(psfrad_fwhm=3., maxiter=20, threshold=thresholds[image.band])
+    tbl = image.compute_source_table(psfrad_fwhm=3., maxiter=20,
+                                      threshold=thresholds[image.band])
+    del image
+    return tbl
 
 def compute_photometry_task(params):
     tbl = params['image'].compute_photometry(params['ra'], params['dec'],
-                                       psfrad_fwhm=10., maxiter=10, mergerad_fwhm=0)
+                                             psfrad_fwhm=10., maxiter=10,
+                                             mergerad_fwhm=0)
     # Save the psf and subtracted images
     dp = params['image']._cache['daophot']
     psf_filename = os.path.join(params['workdir'], params['image'].name+'-psf.fits')
     dp.get_psf().writeto(psf_filename)
     sub_filename = os.path.join(params['workdir'], params['image'].name+'-sub.fits')
     dp.get_subimage().writeto(sub_filename)
+    del dp
     return tbl
 
