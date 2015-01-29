@@ -15,9 +15,9 @@ from astropy.io import fits
 # Importing pyraf -- note that this requires IRAF to be installed
 # and the "iraf" and "IRAFARCH" environment variables to be set
 with warnings.catch_warnings():
-    # Ignore the ImportWarning we oft get when importing pyraf, which results
-    # from the fact that pyraf likes to create working dirs with its name in the local dir.
-    warnings.simplefilter("ignore", category=ImportWarning)
+    # Ignore the ImportWarning we often get when importing pyraf, because pyraf
+    # likes to create working dirs with its name in the local dir.
+    warnings.filterwarnings("ignore", message="(.*)Not importing dir(.*)")
     # Disable pyraf graphics:
     from stsci.tools import capable
     capable.OF_GRAPHICS = False
@@ -32,26 +32,28 @@ from .utils import timed
 
 
 class DaophotError(Exception):
-    """Raised if a requested field has not been observed yet."""
+    """Raised if Daophot failed to perform an operation."""
     pass
 
 
 class Daophot(object):
     """DAOPHOT wrapper class.
 
-    The speed of psf and allstar tasks are mostly affected by the psfrad and psfnmax parameters.
-    IRAF is very stateful, and hence the constructor of this class expects
-    to receive all the configuration parameters.
+    The constructor of this class expects to receive
+    ALL the non-default configuration parameters because IRAF is very stateful.
+
+    The speed of psf and allstar tasks are mostly affected by the psfrad
+    and psfnmax parameters.
     """
     def __init__(self, image_path, workdir='/tmp', **kwargs):
         self._workdir = tempfile.mkdtemp(prefix='daophot-', dir=workdir)
         self._path_cache = {}
         self._path_cache['image_path'] = image_path
-        self._setup_iraf(**kwargs)      
+        self._setup_iraf(**kwargs)
 
     def __del__(self):
         """Destructor; cleans up the temporary directory."""
-        pass #shutil.rmtree(self._workdir)
+        pass  # shutil.rmtree(self._workdir)
 
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
                     fitsky='yes', function='moffat25', fwhmpsf=3., itime=10.,
@@ -63,6 +65,9 @@ class Daophot(object):
         Parameters
         ----------
         fitrad_fwhm : float
+            The PSF fitting radius.  Recommended by the DAOPHOT manual to have
+            a value close to the FWHM.  Trials suggests that increasing
+            the value does not really help saturated stars to be fit.
 
         fitsky : str
             Recompute sky during fit? One of 'yes' or 'no'.
@@ -80,13 +85,13 @@ class Daophot(object):
             Use 0 to disable source merging during PSF fitting.
 
         nclean: int
-            No. of passes used to clean the PSF from bad pixels, neighbours, etc.
-            In the DAOPHOT manual, Stetson recommends 5 passes.
+            Number of passes used to clean the PSF from bad pixels, neighbours,
+            etc. The DAOPHOT manual recommends 5 passes. (default: 5)
 
         psfrad_fwhm : float
-             Radius of psf model. Must be somewhat larger than fitrad. The wings
-             beyond fitrad will not determine the fit, but a large value is
-             necessary to subtract the wings of bright stars properly if desired.
+             Radius of psf model. Must be somewhat larger than fitrad.
+             The wings beyond fitrad will not determine the fit, but a large
+             value is necessary to subtract the wings of bright stars properly.
              A large value comes at a computational cost, however.
 
         threshold: float
@@ -97,8 +102,10 @@ class Daophot(object):
 
         varorder : int
             Variation of psf model: 0=constant, 1=linear, 2=cubic
-            varorder = -1 (analytic) gives very poor results (thought it may be more robust in crowded fields, in principle)
-            varorder 1 or 2 is possible marginally better than 0, though it is not obvious in VPHAS data.
+            varorder = -1 (analytic) gives very poor results
+            (though it may be more robust in crowded fields, in principle).
+            varorder 1 or 2 is possible marginally better than 0,
+            though it is not obvious in VPHAS data.
         """
         # Ensure we start from the iraf defaults
         for module in ['datapars', 'findpars', 'centerpars', 'fitskypars',
@@ -107,35 +114,35 @@ class Daophot(object):
         # Avoid the "Out of space in image header" exception
         iraf.set(min_lenuserarea=640000)
         # Set data-dependent IRAF/DAOPHOT configuration parameters
-        iraf.datapars.fwhmpsf = fwhmpsf  # [pixels]
-        iraf.datapars.sigma = sigma   # sigma(background) [ADU]
+        iraf.datapars.fwhmpsf = fwhmpsf   # [pixels]
+        iraf.datapars.sigma = sigma       # sigma(background) [ADU]
         iraf.datapars.datamin = datamin   # min good pix value [ADU]
         iraf.datapars.datamax = datamax   # max good pix value [ADU]
-        iraf.datapars.readnoi = readnoi # [electrons]
-        iraf.datapars.epadu = epadu        # [electrons per ADU]
-        iraf.datapars.itime = itime
-        iraf.daofind.ratio = ratio    # 2D Gaussian PSF fit ratio
-        iraf.daofind.theta = theta    # 2D Gaussian PSF fit angle
-        iraf.photpars.aperture = fwhmpsf # Aperture radius
-        iraf.photpars.zmag = zmag    # Magnitude zero point
-        # PSF fitting radius; recommended by DAOPHOT manual to be close to the FWHM
-        # experimentation suggests that increasing this value does not allow
-        # saturated stars to be fit
-        iraf.daopars.fitrad = fitrad_fwhm * fwhmpsf
-        iraf.daopars.psfrad = psfrad_fwhm * fwhmpsf
+        iraf.datapars.readnoi = readnoi   # [electrons]
+        iraf.datapars.epadu = epadu       # [electrons per ADU]
+        iraf.datapars.itime = itime       # exposure time [seconds]
+        iraf.daofind.ratio = ratio        # 2D Gaussian PSF fit ratio
+        iraf.daofind.theta = theta        # 2D Gaussian PSF fit angle
+        iraf.photpars.aperture = fwhmpsf  # Aperture radius
+        iraf.photpars.zmag = zmag         # Magnitude zero point
+        # PSF parameters
+        iraf.daopars.psfrad = psfrad_fwhm * fwhmpsf  # PSF radius
+        iraf.daopars.fitrad = fitrad_fwhm * fwhmpsf  # PSF fitting radius
         iraf.daopars.mergerad = mergerad_fwhm * fwhmpsf
         # Setting a good sky annulus is important; a large annulus will ignore
         # background changes on small scales, and will cause aperture photom
-        # in the wings of bright stars to be overestimated
-        iraf.daopars.sannulus = 2 * fwhmpsf             # Inner radius of sky fitting annulus in scale units, default: 0.0
-        iraf.daopars.wsannulus = 2 * fwhmpsf              # Width of sky fitting annulus in scale units, default: 11.0
+        # in the wings of bright stars to be overestimated.
+        # => Inner radius of sky fitting annulus in scale units, default: 0.0
+        iraf.daopars.sannulus = 2 * fwhmpsf
+        # => Width of sky fitting annulus in scale units, default: 11.0
+        iraf.daopars.wsannulus = 2 * fwhmpsf
         # Allstar will re-measure the background in the PSF-subtracted image
         # using this sky annulus -- change this if you see haloes around stars.
         # The annulus should lie outside the psfrad to get the prettiest
         # subtracted image, but putting the annulus far from the star might
         # cause trouble in case of a spatially variable background!
         iraf.fitskypars.annulus = iraf.daopars.psfrad
-        iraf.fitskypars.dannulus = 3 * fwhmpsf  
+        iraf.fitskypars.dannulus = 3 * fwhmpsf
         # Non data-dependent parameters
         iraf.daopars.recenter = recenter
         iraf.daopars.nclean = nclean
@@ -157,7 +164,8 @@ class Daophot(object):
         Returns
         -------
         table : astropy.table.Table object
-            Merged table containing the results of the apphot and allstar tasks.
+            Table containing the results of the PSF photometry;
+            this is a merge of the apphot and allstar output tables.
         """
         self.daofind()
         self.apphot()
@@ -166,47 +174,58 @@ class Daophot(object):
         return self.get_allstar_phot_table()
 
     @timed
-    def daofind(self, output_filename='output-daofind.txt'):
-        """DAOFIND searches the image for local density maxima, with a 
+    def daofind(self, output_fn='output-daofind.txt'):
+        """DAOFIND searches the image for local density maxima, with a
         peak amplitude greater than `threshold` * `sky_sigma` above the
         local background.
 
-        Returns
-        -------
-        A table of detected objects.
+        Parameters
+        ----------
+        output_fn : str (optional)
+            Where to write the output text file? (defaults to a temporary file)
         """
-        self._path_cache['daofind_output'] = os.path.join(self._workdir, output_filename)
-        daofind_args = dict(image = self._path_cache['image_path'],
-                            output = self._path_cache['daofind_output'],
-                            verify = 'no',
-                            verbose = 'no',
-                            starmap= os.path.join(self._workdir, 'starmap.'),
-                            skymap = os.path.join(self._workdir, 'skymap.'))
-                            #Stdout = os.path.join(self._workdir,
-                            #                     'log-daofind.txt'))
+        self._path_cache['daofind_output'] = os.path.join(self._workdir,
+                                                          output_fn)
+        daofind_args = dict(image=self._path_cache['image_path'],
+                            output=self._path_cache['daofind_output'],
+                            verify='no',
+                            verbose='no',
+                            starmap=os.path.join(self._workdir, 'starmap.'),
+                            skymap=os.path.join(self._workdir, 'skymap.'))
         iraf.daophot.daofind(**daofind_args)
 
-    def apphot(self, output_filename='output-apphot.txt',
-                            coords=None):
+    def apphot(self, output_fn='output-apphot.txt', coords=None):
+        """Run the DAOPHOT aperture photometry task.
+
+        Parameters
+        ----------
+        output_fn : str (optional)
+            Where to write the output text file? (defaults to a temporary file)
+
+        coords : str
+            Path to an output file of DAOFIND.  By default, it will use the
+            output from the most recent call to daofind() on this object.
+        """
         if coords is None:
             try:
                 coords = self._path_cache['daofind_output']
             except KeyError:
                 raise DaophotError('You need to run Daophot.daofind '
                                    'before Daophot.apphot can be used.')
-        self._path_cache['apphot_output'] = os.path.join(self._workdir, output_filename)
-        phot_args = dict(image = self._path_cache['image_path'],
-                         output = self._path_cache['apphot_output'],
-                         coords = coords,
-                         verify = 'no',
-                         interactive = 'no',
-                         cache = 'yes',
-                         verbose = 'no')
+        self._path_cache['apphot_output'] = os.path.join(self._workdir,
+                                                         output_fn)
+        phot_args = dict(image=self._path_cache['image_path'],
+                         output=self._path_cache['apphot_output'],
+                         coords=coords,
+                         verify='no',
+                         interactive='no',
+                         cache='yes',
+                         verbose='no')
         iraf.daophot.phot(**phot_args)
 
     @timed
     def psf(self, failsafe=True):
-        """Fits a PSF model.
+        """Runs the DAOPHOT PSF model fitting task.
 
         Parameters
         ----------
@@ -214,37 +233,41 @@ class Daophot(object):
             If true and the PSF fitting fails to converge, then re-try the fit
             automatically with varorder = 0 and function = 'auto'.
         """
-        if not self._path_cache.has_key('apphot_output'):
+        if 'apphot_output' not in self._path_cache:
             raise DaophotError('You need to run Daophot.apphot '
                                'before Daophot.psf can be used.')
-        self._path_cache['pstselect_output'] = os.path.join(self._workdir, 'output-pstselect.txt')
-        pstselect_args = dict(mode = 'h',
-                              image = self._path_cache['image_path'],
-                              photfile = self._path_cache['apphot_output'],
-                              pstfile = self._path_cache['pstselect_output'],
-                              verify = 'no',
-                              interactive = 'no',
-                              verbose = 'yes',
-                              Stdout = str(os.path.join(self._workdir,
-                                                    'log-pstselect.txt')))
+        # First select the stars to fit the model against
+        self._path_cache['pstselect_output'] = os.path.join(self._workdir,
+                                                            'output-pstselect.txt')
+        pstselect_args = dict(mode='h',
+                              image=self._path_cache['image_path'],
+                              photfile=self._path_cache['apphot_output'],
+                              pstfile=self._path_cache['pstselect_output'],
+                              verify='no',
+                              interactive='no',
+                              verbose='yes',
+                              Stdout=str(os.path.join(self._workdir,
+                                                      'log-pstselect.txt')))
         iraf.daophot.pstselect(**pstselect_args)
-        
-        #self._path_cache['psf_output'] = os.path.join(self._workdir, 'output-psf')  # daophot will append .fits
-        self._path_cache['psf_output'] = os.path.join(self._workdir, 'output-psf')
-        self._path_cache['psg_output'] = os.path.join(self._workdir, 'output-psg.txt')
-        self._path_cache['psf_pst_output'] = os.path.join(self._workdir, 'output-psf-pst.txt')
-        psf_args = dict(image = self._path_cache['image_path'],
-                        photfile = self._path_cache['apphot_output'],
-                        psfimage = self._path_cache['psf_output'],
-                        pstfile = self._path_cache['pstselect_output'],
-                        groupfile = self._path_cache['psg_output'],
-                        opstfile = self._path_cache['psf_pst_output'],
-                        verify = 'no',
-                        interactive = 'no',
-                        cache = 'yes',
-                        verbose = 'yes',
-                        Stdout = str(os.path.join(self._workdir,
-                                              'log-psf.txt')))
+        # Then fit the actual model
+        self._path_cache['psf_output'] = os.path.join(self._workdir,
+                                                      'output-psf')  # daophot will append .fits
+        self._path_cache['psg_output'] = os.path.join(self._workdir,
+                                                      'output-psg.txt')
+        self._path_cache['psf_pst_output'] = os.path.join(self._workdir,
+                                                          'output-psf-pst.txt')
+        psf_args = dict(image=self._path_cache['image_path'],
+                        photfile=self._path_cache['apphot_output'],
+                        psfimage=self._path_cache['psf_output'],
+                        pstfile=self._path_cache['pstselect_output'],
+                        groupfile=self._path_cache['psg_output'],
+                        opstfile=self._path_cache['psf_pst_output'],
+                        verify='no',
+                        interactive='no',
+                        cache='yes',
+                        verbose='yes',
+                        Stdout=str(os.path.join(self._workdir,
+                                                'log-psf.txt')))
         iraf.daophot.psf(**psf_args)
 
         # It is possible for iraf.daophot.psf() to fail to converge.
@@ -266,39 +289,47 @@ class Daophot(object):
 
         # Save the resulting PSF into a user-friendly FITS file
         self._path_cache['seepsf_output'] = os.path.join(self._workdir, 'output-seepsf')  # daophot will append .fits
-        seepsf_args = dict(psfimage = self._path_cache['psf_output'],
-                           image = self._path_cache['seepsf_output'])
+        seepsf_args = dict(psfimage=self._path_cache['psf_output'],
+                           image=self._path_cache['seepsf_output'])
         iraf.daophot.seepsf(**seepsf_args)
 
     @timed
     def allstar(self):
-        if not self._path_cache.has_key('psf_output'):
+        """Run the DAOPHOT allstar task, which extracts PSF photometry."""
+        if 'psf_output' not in self._path_cache:
             raise DaophotError('You need to run Daophot.psf '
                                'before Daophot.allstar can be used.')
-        self._path_cache['allstar_output'] = os.path.join(self._workdir, 'output-allstar.txt')
-        self._path_cache['subimage_output'] = os.path.join(self._workdir, 'output-subimage')  # daophot will append .fits
-        stderr = allstar_args = dict(image = self._path_cache['image_path'],
-                                    photfile = self._path_cache['apphot_output'],
-                                    psfimage = self._path_cache['psf_output'] + '.fits[0]',
-                                    allstarfile = self._path_cache['allstar_output'],
-                                    rejfile = None,
-                                    subimage = self._path_cache['subimage_output'],
-                                    verify = 'no',
-                                    verbose = 'no',
-                                    cache = 'yes',
-                                    Stderr = 1)
+        self._path_cache['allstar_output'] = os.path.join(self._workdir,
+                                                          'output-allstar.txt')
+        self._path_cache['subimage_output'] = os.path.join(self._workdir,
+                                                           'output-subimage')  # daophot will append .fits
+        allstar_args = dict(image=self._path_cache['image_path'],
+                            photfile=self._path_cache['apphot_output'],
+                            psfimage=self._path_cache['psf_output'] + '.fits[0]',
+                            allstarfile=self._path_cache['allstar_output'],
+                            rejfile=None,
+                            subimage=self._path_cache['subimage_output'],
+                            verify='no',
+                            verbose='no',
+                            cache='yes',
+                            Stderr=1)
         iraf.daophot.allstar(**allstar_args)
 
     def save_fits_catalogue(self):
         if hasattr(self, 'output_daofind'):
-            self.catalogue_daofind = os.path.join(self._workdir, 'output-daofind.fits')
-            self.get_daofind_table().write(self.catalogue_daofind, format='fits', overwrite=True)
+            self.catalogue_daofind = os.path.join(self._workdir,
+                                                  'output-daofind.fits')
+            self.get_daofind_table().write(self.catalogue_daofind,
+                                           format='fits', overwrite=True)
 
         self.catalogue_phot = os.path.join(self._workdir, 'output-phot.fits')
-        self.get_phot_table().write(self.catalogue_phot, format='fits', overwrite=True)
+        self.get_phot_table().write(self.catalogue_phot,
+                                    format='fits', overwrite=True)
 
-        self.catalogue_allstar = os.path.join(self._workdir, 'output-allstar.fits')
-        self.get_allstar_table().write(self.catalogue_allstar, format='fits', overwrite=True)
+        self.catalogue_allstar = os.path.join(self._workdir,
+                                              'output-allstar.fits')
+        self.get_allstar_table().write(self.catalogue_allstar,
+                                       format='fits', overwrite=True)
 
     def get_daofind_table(self):
         tbl = Table.read(self._path_cache['daofind_output'], format='daophot')
@@ -312,23 +343,28 @@ class Daophot(object):
     def get_phot_table(self):
         import numpy as np
         tbl = Table.read(self._path_cache['apphot_output'], format='daophot')
-        # Compute a Signal-To-Noise estimate based on the FWHM aperture photometry
-        # Our SNR is marginally better than the MERR computed by DAOPHOT, likely because we don't fold in the flatfield error?
-        variance_per_pixel = tbl['STDEV']**2 + (iraf.datapars.readnoi / iraf.datapars.epadu)**2 # stdev in ADU, gain in photons/ADU, readnoise in photons
+        # Compute a signal-to-noise estimate based on the aperture photometry.
+        # Note that this SNR estimate is marginally more optimistic than the
+        # 'MERR' value produced by DAOPHOT, likely because the latter also
+        # folds the flat-fielding error into the estimate.
+        # Below stdev is in ADU, gain in photons/ADU, readnoise in photons.
+        variance_per_pix = (tbl['STDEV']**2
+                            + (iraf.datapars.readnoi / iraf.datapars.epadu)**2)
         variance_signal = tbl['FLUX'] / iraf.datapars.epadu
         with np.errstate(divide='ignore', invalid='ignore'):
-            tbl['SNR'] = tbl['FLUX'] / np.sqrt(variance_signal + tbl['AREA']*variance_per_pixel)
+            tbl['SNR'] = tbl['FLUX'] / np.sqrt(variance_signal
+                                               + tbl['AREA']*variance_per_pix)
             # Add the 3-sigma detection limit; cf. e.g. http://www.ast.cam.ac.uk/~xmmssc/xid-imaging/dqc/wfc_tech/flux2mag.html
-            tbl['LIM3SIG'] = iraf.photpars.zmag - 2.5*np.log10(3*np.sqrt(tbl['AREA']*variance_per_pixel) / iraf.datapars.itime)
-            #Identical to daophot.phot: tbl['APERMAG'] = iraf.photpars.zmag - 2.5*np.log10(tbl['FLUX'] / iraf.datapars.itime)
+            tbl['LIM3SIG'] = iraf.photpars.zmag - 2.5 * np.log10(3 * np.sqrt(tbl['AREA'] * variance_per_pix) / iraf.datapars.itime)
+            # Identical to daophot.phot: tbl['APERMAG'] = iraf.photpars.zmag - 2.5*np.log10(tbl['FLUX'] / iraf.datapars.itime)
 
         # Circumvent a unit-related exception thrown by astropy:
         tbl['NSKY'].unit = None
         tbl['NSREJ'].unit = None
-        return tbl    
+        return tbl
 
     def get_allstar_table(self):
-        return Table.read(self._path_cache['allstar_output'], format='daophot')     
+        return Table.read(self._path_cache['allstar_output'], format='daophot')
 
     def get_allstar_phot_table(self):
         return table.join(self.get_allstar_table(),
