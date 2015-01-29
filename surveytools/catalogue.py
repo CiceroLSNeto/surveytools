@@ -111,7 +111,7 @@ class VphasFrame(object):
         else:
             raise IOError('File not found:' + os.path.join(datadir, filename))
         self.orig_extension = extension
-        self._workdir = tempfile.mkdtemp(prefix='vphasframe-', dir=workdir)
+        self._workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension), dir=workdir)
         self._cache = {}
         self.confidence_threshold = confidence_threshold
         self.filename, self.extension = self._preprocess_image(subtract_sky=subtract_sky)
@@ -159,9 +159,9 @@ class VphasFrame(object):
         if mask_bad_pixels:
             imgdata[bad_pixel_mask] = -1
         # Estimate the background
-        bg = Background(imgdata, (41, 64), filter_shape=(1, 1),
-                        mask=bad_pixel_mask, method='median',
-                        sigclip_sigma=3., sigclip_iters=5)
+        bg = Background(imgdata, (41, 64), filter_shape=(3, 2),
+                                     mask=bad_pixel_mask, method='median',
+                                     sigclip_sigma=3., sigclip_iters=5)
         log.debug('{0} sky estimate = {1:.1f} +/- {2:.1f}'.format(fltr, bg.background_median, bg.background_rms_median))
         self.sky = bg.background_median
         self.sky_sigma = bg.background_rms_median
@@ -171,12 +171,17 @@ class VphasFrame(object):
             imgdata = imgdata - (bg.background - bg.background_median)
         # Write the sky-subtracted, bad-pixel-masked image to a new FITS file which IRAF can understand
         path = os.path.join(self._workdir, '{0}.fits'.format(fltr))
-        log.info('Writing sky-subtracted image to {0}'.format(path))
+        log.debug('Writing background-subtracted image to {0}'.format(path))
         newhdu = fits.PrimaryHDU(imgdata, hdu.header)
         newhdu.header.extend(fts[0].header, unique=True)
         newhdu.writeto(path)
+        # Also write the background frame
+        self.background_path = os.path.join(self._workdir, '{0}-bg.fits'.format(fltr))
+        log.debug('Writing background image to {0}'.format(self.background_path))
+        newhdu = fits.PrimaryHDU(bg.background, hdu.header)
+        newhdu.writeto(self.background_path)
         # Return the pre-processed image filename and extension
-        return (nosky_path, 0)
+        return (path, 0)
 
     def populate_cache(self):
         """Populate the cache.
@@ -191,6 +196,10 @@ class VphasFrame(object):
     def orig_hdu(self):
         """Returns the FITS HDU object corresponding to the original image."""
         return fits.open(self.orig_filename)[self.orig_extension]
+
+    @property
+    def background_hdu(self):
+        return fits.open(self.background_path)[0]
 
     @cached_property
     def hdu(self):
@@ -531,7 +540,6 @@ class VphasFrameCatalogue(object):
         # Make sure to get rid of any multiprocessing-forked processes;
         # they might be eating up a lot of memory!
         if type(self.cpufarm) is multiprocessing.pool.Pool:
-            log.warning('Terminating multiprocessing.pool.Pool')
             self.cpufarm.terminate()
         pass
 
@@ -565,8 +573,6 @@ class VphasFrameCatalogue(object):
             Table containing the band-merged catalogue.
         """
         log.info('{0}: started creating a catalogue for ccd {1}'.format(self.fieldname, self.ccd))
-        for band in self.frames:
-            self.frames[band].populate_cache()
         source_table = self.create_master_source_table()
         source_table.write(os.path.join(self._workdir, self.name+'-sourcelist.fits'))
 
@@ -629,7 +635,7 @@ class VphasFrameCatalogue(object):
         pl.close(fig)
 
     @timed
-    def plot_images(self, sampling=2):
+    def plot_images(self, sampling=3):
         """Plots the origin, sky-, and psf-subtracted images as JPGs in the workdir.
 
         Parameters
@@ -661,14 +667,24 @@ class VphasFrameCatalogue(object):
                     ax.matshow(subtracted_data, **imgstyle)
                     ax.axis('off')
                     # Make standalone jpgs while at it
+                    # Original image
                     imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd.jpg')
                     orig_data = self.frames[band].orig_hdu.data[::sampling, ::sampling]
                     orig_vmin, orig_vmax = np.percentile(orig_data, [2, 99])
                     mimg.imsave(imsave_filename, np.log10(orig_data),
                                 vmin=np.log10(orig_vmin), vmax=np.log10(orig_vmax),
                                 cmap=pl.cm.gist_heat, origin='lower')
-                    imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd-nosky.jpg')
+                    # Background image
+                    background_fn = os.path.join(self._workdir, self.frames[band].name+'-ccd-bg.jpg')
+                    bg_data = self.frames[band].background_hdu.data[::sampling, ::sampling]
+                    mimg.imsave(background_fn, np.log10(bg_data),
+                                vmin=np.log10(orig_vmin), vmax=np.log10(orig_vmax),
+                                cmap=pl.cm.gist_heat, origin='lower')                 
+                    # Sky-subtracted image
+                    imsave_filename = os.path.join(self._workdir,
+                                                   self.frames[band].name+'-ccd-nosky.jpg')
                     mimg.imsave(imsave_filename, image_data, **imgstyle)
+                    # PSF-subtracted image
                     sub_imsave_filename = os.path.join(self._workdir, self.frames[band].name+'-ccd-nostars.jpg')
                     mimg.imsave(sub_imsave_filename, subtracted_data, **imgstyle)      
         fig.tight_layout()
@@ -720,15 +736,26 @@ class VphasOffsetPointing(object):
                 image_filenames.update(self.get_blue_filenames())
             except NotObservedException as e:
                 log.warning(e.message)  # We can tolerate the blue data missing
-        log.debug('{0}: {1}'.format(self.pointing_name, image_filenames))
+        log.debug('{0}: using the following files: {1}'.format(self.pointing_name, image_filenames))
         # Having obtained the filenames, start computing!
+        import multiprocessing
+        pool = multiprocessing.Pool(len(image_filenames))
+
         framecats = []
         for ccd in ccdlist:
+            jobs = []
+            for fn in image_filenames.values():
+                params = {'filename': fn,
+                          'extension': ccd,
+                          'kwargs': self.kwargs}
+                jobs.append(params)
             frames = {}
-            for band, fn in image_filenames.iteritems():
-                frames[band] = VphasFrame(fn, ccd, **self.kwargs)
+            for frame in pool.imap(init_vphasframe, jobs):
+                frames[frame.band] = frame
+            pool.terminate()
             vfc = VphasFrameCatalogue(frames, ccd=ccd)
             framecats.append(vfc.create_catalogue())
+
         catalogue = table.vstack(framecats, metadata_conflicts='silent')
         return catalogue
 
@@ -836,3 +863,8 @@ def compute_photometry_task(params):
     del dp
     return tbl
 
+def init_vphasframe(params):
+    log.debug('Creating a VphasFrame instance for {0}[{1}]'.format(params['filename'], params['extension']))
+    frame = VphasFrame(params['filename'], params['extension'], **params['kwargs'])
+    frame.populate_cache()
+    return frame
