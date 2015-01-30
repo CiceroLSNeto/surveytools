@@ -77,8 +77,7 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
         sampling = int(500 / dpi)
         im = ax.matshow(f[hduno].data[::sampling, ::-sampling],
                         norm=LogNorm(vmin=vmin, vmax=vmax),
-                        cmap=cmap,
-                        origin='lower')
+                        cmap=cmap, origin='lower')
         ax.set_xticks([])
         ax.set_yticks([])
         ax.axis('off')

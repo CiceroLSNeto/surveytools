@@ -221,7 +221,7 @@ class Daophot(object):
         iraf.daophot.phot(**phot_args)
 
     @timed
-    def psf(self, maxnpsf=50, failsafe=True):
+    def psf(self, maxnpsf=50, failsafe=True, norm_scatter_limit=0.1):
         """Runs the DAOPHOT PSF model fitting task.
 
         Parameters
@@ -271,41 +271,76 @@ class Daophot(object):
                         Stdout=str(path_psf_log))
         iraf.daophot.psf(**psf_args)
 
-        # Verify the success of the fit
-        logfile = open(path_psf_log, 'r')
-        norm_scatter = float(re.findall("norm scatter: ([\d\.]+)", logfile.read())[0])
-        logfile.close()
-        log.debug('DAOPHOT PSF norm scatter: {0}'.format(norm_scatter))
-        if failsafe and (norm_scatter > 0.1) and os.path.exists(self._path_cache['psf_output'] + '.fits'):
-            # It's important to remove the PSF output file,
-            # otherwise DAOPHOT will add an extension to it on the 2nd iteration
-            os.remove(self._path_cache['psf_output'] + '.fits')
-
         # It is possible for iraf.daophot.psf() to fail to converge.
         # In this case, we re-try with more easy-to-fit settings.
-        if not os.path.exists(self._path_cache['psf_output'] + '.fits'):
-            log.warning('iraf.daophot.psf appears to have failed; '
-                        'now trying again in failsafe mode.')
+        success, norm_scatter = self._psf_success(path_psf_log, norm_scatter_limit)
+        if not success:
+            if not failsafe:
+                log.error('')
+            # It's important to remove the PSF output file before repeating
+            # the fit, otherwise daophot will add a 2nd extension to it.
+            try:
+                os.remove(self._path_cache['psf_output'] + '.fits')
+            except OSError:
+                pass  # psf output does not exist if the model failed to converge
+
+            log.warning('daophot.psf: failure to fit a good PSF, '
+                        'now trying failsafe mode.')
             tmp_varorder = iraf.daopars.varorder
-            tmp_function = iraf.daopars.function
+            #tmp_function = iraf.daopars.function
             tmp_nclean = iraf.daopars.nclean
             iraf.daopars.varorder = 0
-            iraf.daopars.function = 'auto'
-            iraf.daopars.nclean = tmp_nclean * 2
+
+            iraf.daopars.psfrad = iraf.daopars.psfrad / 2.
+            iraf.fitskypars.annulus = iraf.fitskypars.annulus / 2.
+            
+            #iraf.daopars.function = 'auto'
+            iraf.daopars.nclean = tmp_nclean * 3
+
             # Run pstselect & psf again
-            pstselect_args['maxnpsf'] = maxnpsf * 2
+            pstselect_args['maxnpsf'] = maxnpsf * 4
             iraf.daophot.pstselect(**pstselect_args)
             iraf.daophot.psf(**psf_args)
+            
             # Restore the original configuration
             iraf.daopars.varorder = tmp_varorder
-            iraf.daopars.function = tmp_function
+            #iraf.daopars.function = tmp_function
             iraf.daopars.nclean = tmp_nclean
+
+            success, norm_scatter = self._psf_success(path_psf_log, norm_scatter_limit * 10)
+            log.warning('daophot.psf: norm_scatter on second attempt = {0}'.format(norm_scatter))
+            if not success:
+                raise DaophotError('daophot.psf failed on failsafe attempt')
 
         # Save the resulting PSF into a user-friendly FITS file
         self._path_cache['seepsf_output'] = os.path.join(self._workdir, 'output-seepsf')  # daophot will append .fits
         seepsf_args = dict(psfimage=self._path_cache['psf_output'],
                            image=self._path_cache['seepsf_output'])
         iraf.daophot.seepsf(**seepsf_args)
+
+        return norm_scatter
+
+    def _psf_success(self, path_psf_log, norm_scatter_limit=0.1):
+        """Returns True if the daophot.psf log indicates a good PSF fit."""
+        logfile = open(path_psf_log, 'r')
+        logtxt = logfile.read()
+        logfile.close()
+        success = True
+        if len(re.findall("failed to converge", logtxt)) > 0:
+            log.warning('daophot.psf: logfile indicates failure to converge')
+            success = False
+            norm_scatter_best = 999.
+        else:
+            # Check for a very poor fit score
+            norm_scatter = re.findall("norm scatter[ :=]+([\d\.]+)", logtxt)
+            norm_scatter.sort()
+            norm_scatter_best = float(norm_scatter[0])
+            log.info('daophot.psf: norm scatter = {0} ({1})'.format(norm_scatter_best, self._path_cache['image_path']))
+            if norm_scatter_best > norm_scatter_limit:
+                log.warning('daophot.psf: norm scatter exceeds limit '
+                            '({0} > {1})'.format(norm_scatter_best, norm_scatter_limit))
+                success = False
+        return (success, norm_scatter_best)
 
     @timed
     def allstar(self):
@@ -399,5 +434,5 @@ class Daophot(object):
         return self._path_cache['seepsf_output'] + '.fits'
 
     @property
-    def subimagef_path(self):
+    def subimage_path(self):
         return self._path_cache['subimage_output'] + '.fits'
