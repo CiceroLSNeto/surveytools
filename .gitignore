@@ -52,3 +52,11 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# Bitmaps
+*.fits*
+*.png
+*.jpg
+
+# Sandbox
+sandbox/*
