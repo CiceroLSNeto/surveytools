@@ -59,8 +59,9 @@ class Daophot(object):
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
                     fitsky='yes', function='moffat25', fwhmpsf=3., itime=10.,
                     maxiter=50, mergerad_fwhm=2., nclean=10,
-                    psfrad_fwhm=10., ratio=1., theta=0., readnoi=0, sigma=5.,
-                    threshold=3., recenter='yes', varorder=1, zmag=20.):
+                    psfrad_fwhm=10., ratio=1., readnoi=0, recenter='yes',
+                    roundlo=-1.0, roundhi=1.0, sharplo=0.2, sharphi=1.0,
+                    sigma=5., theta=0., threshold=3., varorder=1, zmag=20.):
         """Sets the IRAF/DAOPHOT configuration parameters.
 
         Parameters
@@ -92,11 +93,29 @@ class Daophot(object):
              value is necessary to subtract the wings of bright stars properly.
              A large value comes at a computational cost, however.
 
-        threshold: float
-            Daofind object detection threshold.
+        ratio : float (optional)
+            Ratio of minor to major axis of Gaussian kernel for object detection (default: 1.0)
 
         recenter : str
             One of 'yes' or 'no'.
+
+        roundlo : float (optional)
+            Lower bound on roundness for object detection (default: -1.0)
+
+        roundhi : float (optional)
+            Upper bound on roundness for object detection (default: 1.0)
+
+        sharplo : float (optional)
+            Lower bound on sharpness for object detection (default: 0.2)
+
+        sharphi : float (optional)
+            Upper bound on sharpness for object detection (default: 1.0)
+
+        theta : float (optional)
+            Position angle of major axis of Gaussian kernel for object detection (default: 0.0)
+
+        threshold: float
+            Threshold in sigma for object detection (default: 3.0)
 
         varorder : int
             Variation of psf model: 0=constant, 1=linear, 2=cubic
@@ -150,7 +169,12 @@ class Daophot(object):
         iraf.daopars.saturated = 'yes'  # This appears to improve the wings
         iraf.daopars.maxiter = maxiter
         iraf.daopars.function = function
+        # Object detection (daofind) parameters
         iraf.findpars.threshold = threshold
+        iraf.findpars.sharplo = sharplo
+        iraf.findpars.sharphi = sharphi
+        iraf.findpars.roundlo = roundlo
+        iraf.findpars.roundhi = roundhi
 
     def psf_photometry(self):
         """Runs the daofind, phot, psf, and allstar tasks.
@@ -276,38 +300,29 @@ class Daophot(object):
         success, norm_scatter = self._psf_success(path_psf_log, norm_scatter_limit)
         if not success:
             if not failsafe:
-                log.error('')
+                log.error('daophot.psf failed to fit the PSF')
+                return norm_scatter
             # It's important to remove the PSF output file before repeating
             # the fit, otherwise daophot will add a 2nd extension to it.
             try:
                 os.remove(self._path_cache['psf_output'] + '.fits')
             except OSError:
                 pass  # psf output does not exist if the model failed to converge
-
             log.warning('daophot.psf: failure to fit a good PSF, '
                         'now trying failsafe mode.')
+            # Fitting the PSF model usually fails because one or more spurious
+            # objects have been selected.  Reducing the number of objects,
+            # and simplifying the model, often delivers an acceptable model.
             tmp_varorder = iraf.daopars.varorder
-            #tmp_function = iraf.daopars.function
-            tmp_nclean = iraf.daopars.nclean
             iraf.daopars.varorder = 0
-
-            iraf.daopars.psfrad = iraf.daopars.psfrad / 2.
-            iraf.fitskypars.annulus = iraf.fitskypars.annulus / 2.
-            
-            #iraf.daopars.function = 'auto'
-            iraf.daopars.nclean = tmp_nclean * 3
-
+            pstselect_args['maxnpsf'] = 10
             # Run pstselect & psf again
-            pstselect_args['maxnpsf'] = maxnpsf * 4
             iraf.daophot.pstselect(**pstselect_args)
-            iraf.daophot.psf(**psf_args)
-            
+            iraf.daophot.psf(**psf_args)           
             # Restore the original configuration
             iraf.daopars.varorder = tmp_varorder
-            #iraf.daopars.function = tmp_function
-            iraf.daopars.nclean = tmp_nclean
-
-            success, norm_scatter = self._psf_success(path_psf_log, norm_scatter_limit * 10)
+            success, norm_scatter = self._psf_success(path_psf_log,
+                                                      norm_scatter_limit=None)
             log.warning('daophot.psf: norm_scatter on second attempt = {0}'.format(norm_scatter))
             if not success:
                 raise DaophotError('daophot.psf failed on failsafe attempt')
@@ -336,7 +351,7 @@ class Daophot(object):
             norm_scatter.sort()
             norm_scatter_best = float(norm_scatter[0])
             log.info('daophot.psf: norm scatter = {0} ({1})'.format(norm_scatter_best, self._path_cache['image_path']))
-            if norm_scatter_best > norm_scatter_limit:
+            if (norm_scatter_limit is not None) and norm_scatter_best > norm_scatter_limit:
                 log.warning('daophot.psf: norm scatter exceeds limit '
                             '({0} > {1})'.format(norm_scatter_best, norm_scatter_limit))
                 success = False
