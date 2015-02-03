@@ -421,18 +421,9 @@ class VphasFrame(object):
         return dp
 
     def compute_source_table(self, threshold=3., **kwargs):
-        # We allow saturated pixels during source detection.  This allows
-        # saturated stars to be centroided reasonably well, and reduces
-        # the number of spurious sources in the wings.
-        #iraf.datapars.datamax = 99999
+        """Returns a table of sources in the frame, and their photometry."""
         dp = self.daophot(threshold=threshold, **kwargs)
-        #sources = dp.psf_photometry()
-        dp.daofind()
-        dp.apphot()
-        dp.psf()
-        dp.allstar()
-        sources = dp.get_allstar_phot_table()
-                
+        sources = dp.do_psf_photometry()             
         mask = (
                 (sources['SNR'] > threshold)
                 & (np.abs(sources['SHARPNESS']) < 1)
@@ -482,9 +473,11 @@ class VphasFrame(object):
         psf_tbl_filename = os.path.join(self.workdir, 'psf-coords-tbl.txt')
         psf_tbl.write(psf_tbl_filename, format='ascii')
 
-        dp = self.daophot(**kwargs)  # now start daophot
+        dp = self.daophot(roundlo=-0.5, roundhi=0.5, **kwargs)  # now start daophot
         # Fit the PSF model
+        dp.daofind()
         dp.apphot(coords=psf_tbl_filename)
+        dp.pstselect()
         psf_scatter = dp.psf()
         # Carry out the aperture and PSF photometry
         dp.apphot(coords=coords_tbl_filename)
@@ -627,7 +620,6 @@ class VphasFrameCatalogue(object):
         Number of the OmegaCam CCD, corresponding to the extension number in
         the 32-CCD multi-extension FITS images produced by the camera.
     """
-
     def __init__(self, frames, ccd, workdir, cpufarm=None):
         self.frames = frames
         self.fieldname = self.frames['i'].name.split('-')[0]
