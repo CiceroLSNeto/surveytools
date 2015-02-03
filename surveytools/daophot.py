@@ -389,7 +389,7 @@ class Daophot(object):
             tmp_varorder = iraf.daopars.varorder
             iraf.daopars.varorder = 0
             # Run pstselect & psf again
-            iraf.daophot.pstselect(**pstselect_args, maxnpsf=10, prune_outliers=True)
+            iraf.daophot.pstselect(maxnpsf=10, prune_outliers=True, **pstselect_args)
             iraf.daophot.psf(**psf_args)
             iraf.daopars.varorder = tmp_varorder  # restore original config
             success, norm_scatter = psf_success(path_psf_log,
@@ -506,7 +506,7 @@ class Daophot(object):
 # HELPER FUNCTIONS
 ###################
 
-def pstselect_prune(self, pstselect_output_path, new_path):
+def pstselect_prune(pstselect_output_path, new_path):
     """Removes likely spurious objects from the output of the `pstselect` task.
     
     This routine will deem an object to be spurious if its sky level is an
@@ -548,7 +548,7 @@ def pstselect_prune(self, pstselect_output_path, new_path):
     fh.close()
 
 
-def psf_success(self, path_psf_log, norm_scatter_limit=0.1):
+def psf_success(path_psf_log, norm_scatter_limit=0.1):
     """Returns True if the daophot.psf log indicates a good PSF fit.
 
     Parameters
