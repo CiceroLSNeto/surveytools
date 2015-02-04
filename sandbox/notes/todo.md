@@ -1,6 +1,5 @@
 TODO
 ====
-* Merge VphasOffsetPointing and VphasOffsetCatalogue into one class.
 * Plots PSFs in one bitmap.
 * Remove objects with large shifts altogether?
 * Ensure the merged output catalogue has the right column order of bands.

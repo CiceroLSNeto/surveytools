@@ -373,7 +373,7 @@ class VphasFrame(object):
         0 if they were produced by astropy."""
         return astropy.wcs.WCS(self.hdu.header).wcs_pix2world(x, y, 1)
 
-    def _estimate_psf(self, threshold=20.):
+    def _estimate_psf(self, threshold=100.):
         """Fits a 2D Gaussian PSF to the stars in the images.
 
         This will populate self._cache['psf_fwhm'], self._cache['psf_ratio'],
@@ -405,7 +405,7 @@ class VphasFrame(object):
         # pyraf will complain over a negative theta
         if theta < 0:
             theta += 180
-        log.debug(self.band+' PSF FWHM = {0:.1f}px; ratio = {1:.1f}; theta = {2:.1f}'.format(fwhm, ratio, theta))
+        log.debug('{0} PSF FWHM = {1:.1f}px; ratio = {2:.1f}; theta = {3:.1f}'.format(self.band, fwhm, ratio, theta))
         self._cache['psf_fwhm'] = fwhm
         self._cache['psf_ratio'] = ratio
         self._cache['psf_theta'] = theta
@@ -440,9 +440,12 @@ class VphasFrame(object):
                 )
         sources.meta['band'] = self.band
         tbl = sources[mask]
-        log.info('Identified {0} sources in {1} at sigma > {2}'.format(len(tbl), self.band, threshold))
+        log.info('Identified {0} sources in {1} at sigma > {2}'.format(
+                     len(tbl), self.band, threshold))
         # Add ra/dec columns
-        ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'], tbl['YCENTER_ALLSTAR'], origin=1)
+        ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
+                                 tbl['YCENTER_ALLSTAR'],
+                                 origin=1)
         ra_col = Column(name='ra', data=ra)
         dec_col = Column(name='dec', data=dec)
         tbl.add_columns([ra_col, dec_col])
@@ -480,9 +483,9 @@ class VphasFrame(object):
         psf_tbl_filename = os.path.join(self.workdir, 'psf-coords-tbl.txt')
         psf_tbl.write(psf_tbl_filename, format='ascii')
 
-        dp = self.daophot(roundlo=-0.5, roundhi=0.5, **kwargs)  # now start daophot
+        dp = self.daophot(**kwargs)
         # Fit the PSF model
-        dp.daofind()
+        #dp.daofind()
         dp.apphot(coords=psf_tbl_filename)
         dp.pstselect()
         psf_scatter = dp.psf()
@@ -497,7 +500,9 @@ class VphasFrame(object):
         tbl = dp.get_allstar_phot_table()
         tbl.meta['band'] = self.band
         # Add celestial coordinates ra/dec as columns
-        ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'], tbl['YCENTER_ALLSTAR'], origin=1)
+        ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
+                                 tbl['YCENTER_ALLSTAR'],
+                                 origin=1)
         ra_col = Column(name=self.band+'Ra', data=ra)
         dec_col = Column(name=self.band+'Dec', data=dec)
         tbl.add_columns([ra_col, dec_col])
@@ -517,7 +522,10 @@ class VphasFrame(object):
         # Add extra columns and tune the value of others
         with np.errstate(invalid='ignore'):
             # Remove the untrustworthy magnitude estimates for undetected sources
-            mask_too_faint = (tbl[self.band+'SNR'] < 3) | (tbl[self.band] > tbl[self.band+'MagLim'])
+            mask_too_faint = (
+                                 (tbl[self.band+'SNR'] < 3)
+                                 | (tbl[self.band] > tbl[self.band+'MagLim'])
+                              )
             tbl[self.band][mask_too_faint] = np.nan
             tbl[self.band+'Err'][mask_too_faint] = np.nan
             tbl[self.band+'AperMag'][mask_too_faint] = np.nan
@@ -674,32 +682,41 @@ class VphasOffset(object):
             try:
                 images.update(self.get_blue_filenames())
             except NotObservedException as e:
-                log.warning(e.message)  # We can tolerate the blue data missing
-        log.debug('{0}: using the following files: {1}'.format(self.name, images))
+                log.warning(e.message)  # tolerate a missing blue concat
+        log.debug('{0}: filenames found: {1}'.format(self.name, images))
         # Having obtained the filenames, start computing!
         framecats = []
         for ccd in ccdlist:
             framecats.append(self.create_ccd_catalogue(images=images, ccd=ccd))
         catalogue = table.vstack(framecats, metadata_conflicts='silent')
 
-        self._plot_psf_overview()
+        self._plot_psf_overview(bands=images.keys())
 
         import gc
         log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
 
         return catalogue
 
-    def _plot_psf_overview(self):
-        """Saves a pretty plot showing the PSF in each band."""
+    def _plot_psf_overview(self, bands):
+        """Saves a pretty plot showing the PSF in each band.
+
+        Parameters
+        ----------
+        bands : list of str
+            Names of the bands to create a plot for.
+        """
         from matplotlib._png import read_png
         from matplotlib.offsetbox import AnnotationBbox, OffsetImage
         import matplotlib.patheffects as path_effects
         
-        for band in ['ha', 'r', 'i']:    
+        for band in bands:    
             fig = pl.figure(figsize=(8, 4.5))
             ax = fig.add_subplot(1, 1, 1)
             for idx, ccd in enumerate(OMEGACAM_CCD_ARRANGEMENT):
-                psf_fn = os.path.join(self.workdir, 'ccd-{0}'.format(ccd), '{0}-{1}-{2}-psf.png'.format(self.name, ccd, band))
+                psf_fn = os.path.join(self.workdir, 'ccd-{0}'.format(ccd),
+                                      '{0}-{1}-{2}-psf.png'.format(self.name,
+                                                                   ccd,
+                                                                   band))
                 try:
                     imagebox = OffsetImage(read_png(psf_fn))
                 except IOError:
@@ -720,7 +737,8 @@ class VphasOffset(object):
             ax.set_xticks([])
             ax.set_yticks([])
             ax.axis('off')
-            fig.text(0.025, 1., 'PSFs for {0}-{1} (log-stretched)'.format(self.name, band),
+            fig.text(0.025, 1.,
+                     'PSFs for {0}-{1} (log-stretched)'.format(self.name, band),
                      fontsize=10, ha='left', va='top', color='white')
             fig.tight_layout()
 
@@ -735,6 +753,9 @@ class VphasOffset(object):
 
         Parameters
         ----------
+        images : dict
+            Dictionary mapping band names onto FITS image filenames.
+
         ccd : int
             Number of the OmegaCam CCD, corresponding to the extension number in
             the 32-CCD multi-extension FITS images produced by the camera.
@@ -797,6 +818,11 @@ class VphasOffset(object):
     def create_ccd_sourcelist(self, frames):
         """Creates a list of unique sources for a set of multi-band CCD frames.
 
+        Parameters
+        ----------
+        frames : dict
+            Dictionary mapping band names onto `VphasFrame` objects.
+
         Returns
         -------
         sourcelist : `astropy.table.Table` object
@@ -850,8 +876,10 @@ class VphasOffset(object):
         filenames : dict
         """
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message='(.*)did not parse as fits unit(.*)')
-            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-hari-image-files.fits'))
+            warnings.filterwarnings("ignore", message='(.*)did not parse '
+                                                      'as fits unit(.*)')
+            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA,
+                                               'list-hari-image-files.fits'))
         fieldname = 'vphas_' + self.name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:

@@ -63,7 +63,7 @@ class Daophot(object):
 
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
                     fitsky='yes', function='moffat25', fwhmpsf=3., itime=10.,
-                    maxiter=50, mergerad_fwhm=2., nclean=10,
+                    maxiter=50, maxnpsf=60, mergerad_fwhm=2., nclean=10,
                     psfrad_fwhm=10., ratio=1., readnoi=0, recenter='yes',
                     roundlo=-1.0, roundhi=1.0, sannulus_fwhm=2., 
                     saturated='no', sharplo=0.2, sharphi=1.0,
@@ -102,6 +102,9 @@ class Daophot(object):
         maxiter : int (optional)
             The maximum number of times that the `allstar` task will iterate
             on the PSF fit before giving up. (default: 50)
+
+        maxnpsf : int (optional)
+            The maximum number of candidate psf stars to be selected. (default: 60)
 
         mergerad_fwhm : float (optional)
             The critical separation in units `psffwhm` between two objects
@@ -228,6 +231,8 @@ class Daophot(object):
         iraf.findpars.sharphi = sharphi
         iraf.findpars.roundlo = roundlo
         iraf.findpars.roundhi = roundhi
+        # PSF fitting star selection
+        iraf.pstselect.maxnpsf = maxnpsf
 
     def do_psf_photometry(self):
         """Runs the daofind, apphot, pstselect, psf, and allstar tasks.
@@ -297,14 +302,11 @@ class Daophot(object):
                          verbose='no')
         iraf.daophot.phot(**phot_args)
 
-    def pstselect(self, maxnpsf=60, prune_outliers=True):
+    def pstselect(self, prune_outliers=True):
         """Selects suitable stars for PSF model fitting.
 
         Parameters
         ----------
-        maxnpsf : int (optional)
-            Maximum number of stars to select. (default: 50)
-
         prune_outliers : bool (optional)
             If True, remove any selected stars for which the sky estimate
             is an outlier, as determined using sigma-clipping. This is effective
@@ -319,7 +321,6 @@ class Daophot(object):
                               image=self._path_cache['image_path'],
                               photfile=self._path_cache['apphot_output'],
                               pstfile=output_path,
-                              maxnpsf=maxnpsf,
                               verify='no',
                               interactive='no',
                               verbose='yes',
@@ -341,9 +342,11 @@ class Daophot(object):
 
         Parameters
         ----------
-        failsafe : bool
-            If true and the PSF fitting fails to converge, then re-try the fit
-            automatically with varorder = 0 and function = 'auto'.
+        failsafe : bool (optional)
+            If True and the PSF fitting fails to converge, then re-try the fit
+            automatically with fewer stars and varorder = 0. (default: True)
+
+        norm_scatter_limit : float (optional)
         """
         if 'pstselect_output' not in self._path_cache:
             raise DaophotError('You need to run DaoPhot.pstselect '
@@ -375,26 +378,41 @@ class Daophot(object):
             if not failsafe:
                 log.error('daophot.psf failed to fit the PSF')
                 return norm_scatter
-            # It's important to remove the PSF output file before repeating
-            # the fit, otherwise daophot will add a 2nd extension to it.
-            try:
-                os.remove(self._path_cache['psf_output'] + '.fits')
-            except OSError:
-                pass  # psf output does not exist if the model failed to converge
-            log.warning('daophot.psf: failure to fit a good PSF, '
-                        'now trying failsafe mode.')
+            # psf output does not exist if the model failed to converge
             # Fitting the PSF model usually fails because one or more spurious
             # objects have been selected.  Reducing the number of objects,
             # and simplifying the model, often delivers an acceptable model.
-            tmp_varorder = iraf.daopars.varorder
+            orig_maxnpsf = iraf.pstselect.getParDict()['maxnpsf'].value  # calling `iraf.pstselect.maxnpsf` doesnt work for some strange reason
+            tmp_varorder = iraf.daopars.varorder    
             iraf.daopars.varorder = 0
-            # Run pstselect & psf again
-            iraf.daophot.pstselect(maxnpsf=10, prune_outliers=True, **pstselect_args)
-            iraf.daophot.psf(**psf_args)
-            iraf.daopars.varorder = tmp_varorder  # restore original config
-            success, norm_scatter = psf_success(path_psf_log,
-                                                norm_scatter_limit=None)
-            log.warning('daophot.psf: norm_scatter on second attempt = {0}'.format(norm_scatter))
+            attempts = 5
+            for attempt_no, maxnpsf in enumerate(
+                np.linspace(orig_maxnpsf / 2, 3, attempts, dtype=int)):
+                # It's important to remove the PSF output file before repeating
+                # the fit, otherwise daophot will add a 2nd extension to it.
+                try:
+                    os.remove(self._path_cache['psf_output'] + '.fits')
+                except OSError:
+                    pass  
+                iraf.pstselect.maxnpsf = maxnpsf
+                self.pstselect(prune_outliers=True)
+                iraf.daophot.psf(**psf_args)
+                # Do not set a limit on the last attempt
+                if attempt_no == (attempts - 1):
+                    limit = None
+                else:
+                    limit = norm_scatter_limit
+                success, norm_scatter = psf_success(path_psf_log,
+                                                    norm_scatter_limit=limit)
+                log.warning('daophot.psf: norm_scatter on attempt '
+                            '#{0} = {1:.3f} (maxnpsf={2})'.format(attempt_no+2,
+                                                                  norm_scatter,
+                                                                  maxnpsf))
+                if success:
+                    break
+            # Restore the original config
+            iraf.daopars.varorder = tmp_varorder
+            iraf.pstselect.maxnpsf = orig_maxnpsf
             if not success:
                 raise DaophotError('daophot.psf failed on failsafe attempt')
         
