@@ -6,4 +6,4 @@ if os.environ.get('DISPLAY') is None:
     import matplotlib
     matplotlib.use('Agg')
 
-from catalogue import VphasFrame, VphasFrameCatalogue, VphasOffsetPointing
+from catalogue import VphasFrame, VphasOffset

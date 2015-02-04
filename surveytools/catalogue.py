@@ -4,14 +4,14 @@ Classes
 -------
 VphasFrame
 VphasFrameCatalogue
-VphasOffsetPointing
+VphasOffset
 
 Example use
 -----------
 Create a photometric catalogue of VPHAS pointing 0149a:
 ```
 import vphas
-pointing = vphas.VphasOffsetPointing('0149a')
+pointing = vphas.VphasOffset('0149a')
 pointing.create_catalogue().write('mycatalogue.fits')
 ```
 
@@ -71,6 +71,10 @@ WORKDIR_DEFAULT = '/home/gb/tmp/vphas-workdir'  # Where can we store temporary f
 DATAPATH = '/home/gb/tmp/vphasdisk'
 CALIBDIR = os.path.join(DATAPATH, 'calib')
 DATADIR_DEFAULT = os.path.join(DATAPATH, 'single')
+OMEGACAM_CCD_ARRANGEMENT = [32, 31, 30, 29, 16, 15, 14, 13,
+                            28, 27, 26, 25, 12, 11, 10,  9,
+                            24, 23, 22, 21,  8,  7,  6,  5,
+                            20, 19, 18, 17,  4,  3,  2,  1]
 
 ###########
 # CLASSES
@@ -145,7 +149,6 @@ class VphasFrame(object):
         fts = fits.open(self.orig_filename)
         hdu = fts[self.orig_extension]
         fltr = fts[0].header['ESO INS FILT1 NAME']
-        imgdata = hdu.data
         # Create bad pixel mask
         self.confidence_map_path = os.path.join(CALIBDIR, hdu.header['CIR_CPM'].split('[')[0])
         confmap_hdu = fits.open(self.confidence_map_path)[self.orig_extension]
@@ -153,9 +156,9 @@ class VphasFrame(object):
         # Estimate the background in a mesh of (41, 32) pixels; which is chosen
         # to fit an integer number of times in the image size (4100, 2048).
         # At the pixel scale of 0.21 arcsec/px, this corresponds to ~10 arcsec.
-        bg = Background(imgdata, (41, 32), filter_shape=(6, 6),
-                        mask=bad_pixel_mask, method='median',
-                        sigclip_sigma=3., sigclip_iters=5)
+        bg = Background(hdu.data, (41, 32), filter_shape=(6, 6),
+                        mask=bad_pixel_mask,
+                        method='median', sigclip_sigma=3., sigclip_iters=5)
         log.debug('{0} sky estimate = {1:.1f} +/- {2:.1f}'.format(
                   fltr, bg.background_median, bg.background_rms_median))
         self.sky = bg.background_median
@@ -164,7 +167,9 @@ class VphasFrame(object):
         # Subtract the background
         if subtract_sky:
             # ensure the median level remains the same
-            imgdata = imgdata - (bg.background - bg.background_median)
+            imgdata = hdu.data - (bg.background - bg.background_median)
+        else:
+            imgdata = hdu.data
         # Apply bad pixel mask
         if mask_bad_pixels:
             imgdata[bad_pixel_mask] = -1
@@ -394,6 +399,8 @@ class VphasFrame(object):
         myfit = photutils.morphology.fit_2dgaussian(prf_discrete._prf_array[0][0])
         fwhm = myfit.x_stddev * (2.0 * np.sqrt(2.0 * np.log(2.0)))
         ratio = myfit.y_stddev.value / myfit.x_stddev.value  # Need value to keep it from being an array
+        if ratio > 1:  # Daophot will fail if the ratio is larger than 1 (i.e. it wants tthe ratio of minor to major axis)
+            ratio = 1. / ratio
         theta = myfit.theta.value
         # pyraf will complain over a negative theta
         if theta < 0:
@@ -609,162 +616,21 @@ class VphasFrame(object):
                 mimg.imsave(psf_fn, np.log10(psfhdu.data), dpi=300, **imgstyle)
 
 
-class VphasFrameCatalogue(object):
-    """Creates a multi-band catalogue for one CCD.
-
-    Parameters
-    ----------
-    frames : dictionary of (band, `VphasFrame`) pairs
-
-    ccd : int
-        Number of the OmegaCam CCD, corresponding to the extension number in
-        the 32-CCD multi-extension FITS images produced by the camera.
-    """
-    def __init__(self, frames, ccd, workdir, cpufarm=None):
-        self.frames = frames
-        self.fieldname = self.frames['i'].name.split('-')[0]
-        self.ccd = ccd
-        self.workdir = workdir
-        self.name = '{0}-{1}'.format(self.fieldname, self.ccd)
-        # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
-        if cpufarm is None:
-            self.cpufarm = itertools  # Simple sequential processing
-        else:
-            self.cpufarm = cpufarm
-
-    def __del__(self):
-        """Destructor; cleans up the temporary directory."""
-        #shutil.rmtree(self.workdir)
-        # Make sure to get rid of any multiprocessing-forked processes;
-        # they might be eating up a lot of memory!
-        #if type(self.cpufarm) is multiprocessing.pool.Pool:
-        #    self.cpufarm.terminate()
-        pass
-
-    def create_master_source_table(self):
-        """Returns an astropy Table."""
-        log.info('Creating the master source list')
-        source_tables = {}
-        for tbl in self.cpufarm.imap(source_detection_task, self.frames.values()):
-            source_tables[tbl.meta['band']] = tbl
-        # Now merge the single-band lists into a master source table
-        master_table = source_tables['i']
-        for band in self.frames.keys():
-            if band == 'i':
-                continue  # i is the master
-            current_coordinates = SkyCoord(master_table['ra']*u.deg, master_table['dec']*u.deg)
-            new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
-            idx, sep2d, dist3d = new_coordinates.match_to_catalog_sky(current_coordinates)
-            mask_extra = sep2d > 2*u.arcsec
-            log.info('Found {0} extra sources in {1}.'.format(mask_extra.sum(), band))
-            master_table = table.vstack([master_table, source_tables[band][mask_extra]],
-                                        metadata_conflicts='silent')
-        log.info('Found {0} candidate sources for the catalogue.'.format(len(master_table)))
-
-        # Determine sources suitable for PSF fitting
-        coordinates_i = SkyCoord(source_tables['i']['ra']*u.deg, source_tables['i']['dec']*u.deg)
-        mask_psfstars = source_tables['i']['CHI'] < 1.5
-        for band in self.frames.keys():
-            if band in ['i', 'u']:  # do not require u to have the detection
-                continue
-            new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
-            mask_reliable = source_tables[band]['CHI'] < 1.5
-            idx, sep2d, dist3d = coordinates_i.match_to_catalog_sky(new_coordinates[mask_reliable])
-            # Star must exist in other band and have a good fit
-            mask_psfstars[sep2d > 0.5*u.arcsec] = False
-        psf_table = source_tables['i'][mask_psfstars]
-        log.info('Found {0} candidate stars for PSF model fitting.'.format(len(psf_table)))
-
-        return master_table, psf_table
-
-    @timed
-    def create_catalogue(self):
-        """Main function to compute the catalogue, which will take a few minutes.
-
-        Returns
-        -------
-        catalogue : `astropy.table.Table` object
-            Table containing the band-merged catalogue.
-        """
-        log.info('{0}: started creating a catalogue for ccd {1}'.format(self.fieldname, self.ccd))
-        source_table, psf_table = self.create_master_source_table()
-        source_table.write(os.path.join(self.workdir, self.name+'-sourcelist.fits'))
-        psf_table.write(os.path.join(self.workdir, self.name+'-psflist.fits'))
-
-        jobs = []
-        for band in self.frames:
-            params = {'frame': self.frames[band],
-                      'ra': source_table['ra'],
-                      'dec': source_table['dec'],
-                      'ra_psf': psf_table['ra'],
-                      'dec_psf': psf_table['dec'],
-                      'workdir': self.workdir}
-            jobs.append(params)
-
-        tables = [tbl for tbl in self.cpufarm.imap(list_driven_photometry_task, jobs)]
-        # Band-merge the tables
-        merged = table.hstack(tables, metadata_conflicts='silent')
-        merged['field'] = self.fieldname
-        merged['ccd'] = self.ccd
-        merged['rmi'] = merged['r'] - merged['i']
-        merged['rmha'] = merged['r'] - merged['ha']
-        if 'u' in merged.colnames:
-            merged['umg'] = merged['u'] - merged['g']
-            merged['gmr'] = merged['g'] - merged['r']
-            merged['a10'] = (merged['u10sig'].filled(False)
-                             & merged['g10sig'].filled(False)
-                             & merged['r10sig'].filled(False)
-                             & merged['i10sig'].filled(False)
-                             & merged['ha10sig'].filled(False))
-        output_filename =  os.path.join(self.workdir, self.name+'-catalogue.fits')
-        merged.write(output_filename, format='fits')
-        return merged
-
-    """
-    @timed
-    def plot_psf(self, seepsf_paths, output_fn=None):
-        # Saves a pretty plot showing the PSF in each band.
-        if output_fn is None:
-            output_fn = self.name+'-psf.jpg'
-        fig = pl.figure()
-        cols = 3
-        rows = 2
-        bandorder = ['u', 'g', 'r2', 'ha', 'r', 'i']
-        for idx, band in enumerate(bandorder):
-            if band in seepsf_paths:
-                hdu = fits.open(seepsf_paths[band])[0]
-                psf = hdu.data[5:-5, 5:-5]
-                ax = fig.add_subplot(rows, cols, idx+1)
-                vmin, vmax = 1., hdu.header['PSFHEIGH']
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    ax.imshow(np.log10(psf),
-                              vmin=np.log10(vmin), vmax=np.log10(vmax),
-                              cmap=pl.cm.gist_heat, origin='lower',
-                              interpolation='nearest')
-                ax.set_title(band)
-        pl.suptitle('DAOPHOT PSF: {0}'.format(self.name))
-        fig.tight_layout()
-        log.debug('Writing {0}'.format(output_fn))
-        plot_filename = os.path.join(self.workdir, output_fn)
-        fig.savefig(plot_filename, dpi=120)
-        pl.close(fig)
-    """
-
-
-class VphasOffsetPointing(object):
+class VphasOffset(object):
     """A pointing is a single (ra,dec) position in the sky.
 
     Parameters
     ----------
-    pointing_name : str
+    name : str
         5-character wide identifier, composed of the 4-character wide VPHAS
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
     """
-    def __init__(self, pointing_name, use_multiprocessing=True, **kwargs):
-        if len(pointing_name) != 5 or not pointing_name.endswith(('a', 'b', 'c')):
+    def __init__(self, name, use_multiprocessing=True, workdir=WORKDIR_DEFAULT, **kwargs):
+        if len(name) != 5 or not name.endswith(('a', 'b', 'c')):
             raise ValueError('Illegal pointing name. Expected a string of the form "0001a".')
-        self.pointing_name = pointing_name
+        self.name = name
+        self.workdir = tempfile.mkdtemp(prefix='{0}-'.format(name), dir=workdir)
         self.kwargs = kwargs
         # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
         if use_multiprocessing:
@@ -783,7 +649,7 @@ class VphasOffsetPointing(object):
             pass  # only applies to a multiprocessing.pool.Pool object
 
     @timed
-    def create_catalogue(self, ccdlist=range(1, 33), include_ugr=True, workdir=WORKDIR_DEFAULT):
+    def create_catalogue(self, ccdlist=range(1, 33), include_ugr=True):
         """Main function to create the catalogue.
 
         Parameters
@@ -800,42 +666,173 @@ class VphasOffsetPointing(object):
         """
         # We do not tolerate red data missing
         try:
-            image_filenames = self.get_red_filenames()
+            images = self.get_red_filenames()
         except NotObservedException as e:
             log.error(e.message)
             return
         if include_ugr:
             try:
-                image_filenames.update(self.get_blue_filenames())
+                images.update(self.get_blue_filenames())
             except NotObservedException as e:
                 log.warning(e.message)  # We can tolerate the blue data missing
-        log.debug('{0}: using the following files: {1}'.format(self.pointing_name, image_filenames))
+        log.debug('{0}: using the following files: {1}'.format(self.name, images))
         # Having obtained the filenames, start computing!
         framecats = []
         for ccd in ccdlist:
-            # Setup the working directory to store temporary files
-            ccd_workdir = tempfile.mkdtemp(prefix='{0}-{1}-'.format(self.pointing_name, ccd), dir=workdir)
-            log.info('{0}-{1}: started preparing the data'.format(self.pointing_name, ccd))
-            log.info('{0}-{1}: working directory: {2}'.format(self.pointing_name, ccd, ccd_workdir))
-
-            jobs = []
-            for fn in image_filenames.values():
-                params = {'filename': fn,
-                          'extension': ccd,
-                          'workdir': ccd_workdir,
-                          'kwargs': self.kwargs}
-                jobs.append(params)
-            frames = {}
-            for frame in self.cpufarm.imap(frame_initialisation_task, jobs):
-                frames[frame.band] = frame
-            vfc = VphasFrameCatalogue(frames, ccd=ccd, workdir=ccd_workdir, cpufarm=self.cpufarm)
-            framecats.append(vfc.create_catalogue())
-
-            import gc
-            log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
-
+            framecats.append(self.create_ccd_catalogue(images=images, ccd=ccd))
         catalogue = table.vstack(framecats, metadata_conflicts='silent')
+
+        self._plot_psf_overview()
+
+        import gc
+        log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
+
         return catalogue
+
+    def _plot_psf_overview(self):
+        """Saves a pretty plot showing the PSF in each band."""
+        from matplotlib._png import read_png
+        from matplotlib.offsetbox import AnnotationBbox, OffsetImage
+        import matplotlib.patheffects as path_effects
+        
+        for band in ['ha', 'r', 'i']:    
+            fig = pl.figure(figsize=(8, 4.5))
+            ax = fig.add_subplot(1, 1, 1)
+            for idx, ccd in enumerate(OMEGACAM_CCD_ARRANGEMENT):
+                psf_fn = os.path.join(self.workdir, 'ccd-{0}'.format(ccd), '{0}-{1}-{2}-psf.png'.format(self.name, ccd, band))
+                try:
+                    imagebox = OffsetImage(read_png(psf_fn))
+                except IOError:
+                    continue
+                xy = [idx % 8, int(idx / 8.)]
+                ab = AnnotationBbox(imagebox, xy,
+                                    xybox=(0., 0.),
+                                    xycoords='data',
+                                    boxcoords="offset points",
+                                    bboxprops={'lw': 0, 'facecolor': 'black'})                                  
+                ax.add_artist(ab)
+                ax.text(xy[0]-0.45, xy[1]-0.4, ccd, fontsize=8, color='white',
+                        ha='left', va='top', zorder=999)
+
+            # Aesthetics
+            ax.set_xlim([-.5, 7.5])
+            ax.set_ylim([3.5, -.5])
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.axis('off')
+            fig.text(0.025, 1., 'PSFs for {0}-{1} (log-stretched)'.format(self.name, band),
+                     fontsize=10, ha='left', va='top', color='white')
+            fig.tight_layout()
+
+            output_fn = os.path.join(self.workdir, 'psf-{0}.jpg'.format(band))
+            log.info('{0}: Writing {1}'.format(self.name, output_fn))
+            fig.savefig(output_fn, dpi=120, facecolor='black')
+            pl.close(fig)
+
+    @timed
+    def create_ccd_catalogue(self, images, ccd=1):
+        """Main function to compute the catalogue, which will take a few minutes.
+
+        Parameters
+        ----------
+        ccd : int
+            Number of the OmegaCam CCD, corresponding to the extension number in
+            the 32-CCD multi-extension FITS images produced by the camera.
+
+        Returns
+        -------
+        catalogue : `astropy.table.Table` object
+            Table containing the band-merged catalogue.
+        """
+        # Setup the working directory to store temporary files
+        ccd_workdir = os.path.join(self.workdir, 'ccd-{0}'.format(ccd))
+        os.mkdir(ccd_workdir)
+        log.info('{0}: started catalogueing ccd {1}, workdir: {2}'.format(self.name, ccd, ccd_workdir))
+
+        jobs = []
+        for fn in images.values():
+            params = {'filename': fn,
+                      'extension': ccd,
+                      'workdir': ccd_workdir,
+                      'kwargs': self.kwargs}
+            jobs.append(params)
+        frames = {}
+        for frame in self.cpufarm.imap(frame_initialisation_task, jobs):
+            frames[frame.band] = frame
+                
+        source_table, psf_table = self.create_ccd_sourcelist(frames)
+        source_table.write(os.path.join(ccd_workdir, 'sourcelist.fits'))
+        psf_table.write(os.path.join(ccd_workdir, 'psflist.fits'))
+
+        jobs = []
+        for band in frames:
+            params = {'frame': frames[band],
+                      'ra': source_table['ra'],
+                      'dec': source_table['dec'],
+                      'ra_psf': psf_table['ra'],
+                      'dec_psf': psf_table['dec'],
+                      'workdir': ccd_workdir}
+            jobs.append(params)
+
+        tables = [tbl for tbl in self.cpufarm.imap(list_driven_photometry_task, jobs)]
+
+        # Band-merge the tables
+        merged = table.hstack(tables, metadata_conflicts='silent')
+        merged['field'] = self.name
+        merged['ccd'] = ccd
+        merged['rmi'] = merged['r'] - merged['i']
+        merged['rmha'] = merged['r'] - merged['ha']
+        if 'u' in merged.colnames:
+            merged['umg'] = merged['u'] - merged['g']
+            merged['gmr'] = merged['g'] - merged['r']
+            merged['a10'] = (merged['u10sig'].filled(False)
+                             & merged['g10sig'].filled(False)
+                             & merged['r10sig'].filled(False)
+                             & merged['i10sig'].filled(False)
+                             & merged['ha10sig'].filled(False))
+        output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
+        merged.write(output_filename, format='fits')
+        return merged
+
+    def create_ccd_sourcelist(self, frames):
+        """Creates a list of unique sources for a set of multi-band CCD frames.
+
+        Returns
+        -------
+        sourcelist : `astropy.table.Table` object
+        """
+        source_tables = {}
+        for tbl in self.cpufarm.imap(source_detection_task, frames.values()):
+            source_tables[tbl.meta['band']] = tbl
+        # Now merge the single-band lists into a master source table
+        master_table = source_tables['i']
+        for band in frames.keys():
+            if band == 'i':
+                continue  # i is the master
+            current_coordinates = SkyCoord(master_table['ra']*u.deg, master_table['dec']*u.deg)
+            new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
+            idx, sep2d, dist3d = new_coordinates.match_to_catalog_sky(current_coordinates)
+            mask_extra = sep2d > 2*u.arcsec
+            log.info('Found {0} extra sources in {1}.'.format(mask_extra.sum(), band))
+            master_table = table.vstack([master_table, source_tables[band][mask_extra]],
+                                        metadata_conflicts='silent')
+        log.info('Found {0} candidate sources for the catalogue.'.format(len(master_table)))
+
+        # Determine sources suitable for PSF fitting
+        coordinates_i = SkyCoord(source_tables['i']['ra']*u.deg, source_tables['i']['dec']*u.deg)
+        mask_psfstars = source_tables['i']['CHI'] < 1.5
+        for band in frames.keys():
+            if band in ['i', 'u']:  # do not require u to have the detection
+                continue
+            new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
+            mask_reliable = source_tables[band]['CHI'] < 1.5
+            idx, sep2d, dist3d = coordinates_i.match_to_catalog_sky(new_coordinates[mask_reliable])
+            # Star must exist in other band and have a good fit
+            mask_psfstars[sep2d > 0.5*u.arcsec] = False
+        psf_table = source_tables['i'][mask_psfstars]
+        log.info('Found {0} candidate stars for PSF model fitting.'.format(len(psf_table)))
+
+        return master_table, psf_table
 
     def get_red_filenames(self):
         """Returns the H-alpha, r- and i-band FITS filenames of the red concat.
@@ -850,17 +847,17 @@ class VphasOffsetPointing(object):
 
         Returns
         -------
-        filenames : list of 3 strings
+        filenames : dict
         """
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message='(.*)did not parse as fits unit(.*)')
             metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-hari-image-files.fits'))
-        fieldname = 'vphas_' + self.pointing_name[:-1]
+        fieldname = 'vphas_' + self.name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
             raise NotObservedException('{0} has not been observed in the red filters'.format(self.fieldname))
         offset2idx = {'a': 0, 'b': -1, 'c': 1}
-        offset = offset2idx[self.pointing_name[-1:]]
+        offset = offset2idx[self.name[-1:]]
         # Define the colloquial band names used in the catalogue
         filter2band = {'NB_659': 'ha', 'r_SDSS': 'r', 'i_SDSS': 'i'}
         result = {}
@@ -889,18 +886,18 @@ class VphasOffsetPointing(object):
 
         Returns
         -------
-        filenames : list of 3 strings
+        filenames : dict
         """
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message='(.*)did not parse '
                                                       'as fits unit(.*)')
             metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-ugr-image-files.fits'))
-        fieldname = 'vphas_' + self.pointing_name[:-1]
+        fieldname = 'vphas_' + self.name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
             raise NotObservedException('{0} has not been observed in the blue filters'.format(self.fieldname))
         offset2idx = {'a': 0, 'b': -1, 'c': 1}
-        offset = offset2idx[self.pointing_name[-1:]]
+        offset = offset2idx[self.name[-1:]]
         # Define the colloquial band names used in the catalogue
         filter2band = {'u_SDSS': 'u', 'g_SDSS': 'g', 'r_SDSS': 'r2'}
         result = {}

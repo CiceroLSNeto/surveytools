@@ -297,7 +297,7 @@ class Daophot(object):
                          verbose='no')
         iraf.daophot.phot(**phot_args)
 
-    def pstselect(self, maxnpsf=50, prune_outliers=True):
+    def pstselect(self, maxnpsf=60, prune_outliers=True):
         """Selects suitable stars for PSF model fitting.
 
         Parameters
