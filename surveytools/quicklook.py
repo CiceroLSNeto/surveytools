@@ -1,9 +1,12 @@
-"""Plots a visualisation of a VST/OmegaCam exposure, showing all 32 CCD frames.
+"""Plot quicklook visualisations of VST/OmegaCAM data.
 
 Usage
-=====
+-----
 `vst-pawplot filename.fits`
 """
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import os
 import numpy as np
 from progressbar import ProgressBar
@@ -20,7 +23,7 @@ from astropy.wcs import WCS
 from astropy.visualization import AsymmetricPercentileInterval, SqrtStretch
 
 from . import VPHAS_DATA_PATH, OMEGACAM_CCD_ARRANGEMENT
-from .footprint import VphasOffset
+from .footprint import VphasOffset, NotObservedException
 
 
 ##########
@@ -85,6 +88,8 @@ class VphasColourFrame():
         self.offset = offset
         self.ccd = ccd
         self.filenames = VphasOffset(offset).get_filenames()
+        if len(self.filenames) < 6:
+            raise NotObservedException('Not all six bands have been observed for {0}.'.format(offset))
 
     def as_array(self,
                  interval_r=AsymmetricPercentileInterval(2.5, 99.0),
@@ -109,15 +114,15 @@ class VphasColourFrame():
                 maxshiftx = max(abs(shiftx), maxshiftx)
                 maxshifty = max(abs(shifty), maxshifty)
                 if shiftx > 0:
-                    img = np.pad(img, ((0, 0), (0, shiftx)), mode='constant')[:, shiftx:]
+                    img = np.pad(img, ((0, 0), (0, shiftx)), mode=str('constant'))[:, shiftx:]
                 elif shiftx < 0:
-                    img = np.pad(img, ((0, 0), (-shiftx, 0)), mode='median')[:, :shiftx]            
+                    img = np.pad(img, ((0, 0), (-shiftx, 0)), mode=str('constant'))[:, :shiftx]            
                 if shifty > 0:
-                    img = np.pad(img, ((0, shifty), (0, 0)), mode='median')[shifty:, :]
+                    img = np.pad(img, ((0, shifty), (0, 0)), mode=str('constant'))[shifty:, :]
                 elif shifty < 0:
-                    img = np.pad(img, ((-shifty, 0), (0, 0)), mode='constant')[:shifty, :]          
+                    img = np.pad(img, ((-shifty, 0), (0, 0)), mode=str('constant'))[:shifty, :]          
             cimg[band] = img
-
+        # New stretch, scale, and stack the data into an MxNx3 array
         r = interval_r(cimg['i'] + cimg['ha'])
         g = interval_g(cimg['g'] + cimg['r'] + cimg['r2'])
         b = interval_b(cimg['u'] + 2 * cimg['g'])
@@ -126,19 +131,55 @@ class VphasColourFrame():
                              b[maxshifty:-maxshifty, maxshiftx:-maxshiftx]))
         return LuptonColorStretch()(stacked)
 
-    def imsave(self, output_fn=None):
-        if output_fn is None:
-            output_fn = 'vphas-{0}-{1}.jpg'.format(self.offset, self.ccd)
-        log.info('Writing {0}'.format(output_fn))
-        mimg.imsave(output_fn, np.rot90(self.as_array()), origin='lower')
+    def imsave(self, out_fn=None):
+        if out_fn is None:
+            out_fn = 'vphas-{0}-{1}.jpg'.format(self.offset, self.ccd)
+        log.info('Writing {0}'.format(out_fn))
+        mimg.imsave(out_fn, np.rot90(self.as_array()), origin='lower')
 
 
 ############
 # FUNCTIONS
 ############
 
-def vphas_quicklook(offset, ccd, output_fn=None):
-    VphasColourFrame(offset, ccd).imsave(output_fn)
+def vphas_quicklook(offset, ccd=None, out_fn=None):
+    VphasColourFrame(offset, ccd).imsave(out_fn)
+
+
+
+def vphas_quicklook_main(args=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Create a beautiful colour image from a single VPHAS frame.')
+    parser.add_argument('-o', '--output', metavar='filename',
+                        type=str, default=None,
+                        help='Filename for the output image (Default is a '
+                             'JPG file named vphas-offset-ccd.jpg)')
+    parser.add_argument('-c', '--ccd', nargs='+', type=int, default=None,
+                        help='CCD number between 1 and 32.'
+                             '(Default is to save all CCDs.)')
+    parser.add_argument('--min_percent_r', type=float, default=1.0,
+                        help=('The percentile value used to determine the '
+                              'minimum cut level for the red channel'))
+    parser.add_argument('--max_percent_r', type=float, default=99.5,
+                        help=('The percentile value used to determine the '
+                              'maximum cut level for the red channel'))
+    parser.add_argument('offset', nargs='+',
+                        help='Name of the VPHAS offset pointing.')
+    args = parser.parse_args(args)
+
+    if args.ccd is None:
+        args.ccd = range(1, 33)
+    for offset in args.offset:
+        try:
+            for ccd in args.ccd:
+                vphas_quicklook(offset,
+                                ccd=ccd,
+                                out_fn=args.output)
+        except NotObservedException as e:
+            log.error(e)
+
 
 def vst_pawplot(filename, out_fn=None, dpi=100,
                 min_percent=1.0, max_percent=99.5,

@@ -2,7 +2,8 @@
 from setuptools import setup
 
 entry_points = {'console_scripts': [
-    'vst-pawplot = surveytools.quicklook:vst_pawplot_main'
+    'vst-pawplot = surveytools.quicklook:vst_pawplot_main',
+    'vphas-quicklook = surveytools.quicklook:vphas_quicklook_main'
 ]}
 
 setup(name='surveytools',
@@ -12,5 +13,11 @@ setup(name='surveytools',
       license='MIT',
       url='http://www.vphas.eu',
       packages=['surveytools'],
+      install_requires=['numpy',
+                        'matplotlib',
+                        'progressbar'
+                        'astropy',
+                        'astropy-photutils',
+                        'pyraf'],
       entry_points=entry_points,
       )
