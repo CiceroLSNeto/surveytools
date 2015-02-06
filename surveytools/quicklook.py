@@ -4,24 +4,141 @@ Usage
 =====
 `vst-pawplot filename.fits`
 """
-import matplotlib
-#matplotlib.use('Agg')
-import matplotlib.pyplot as pl
-from matplotlib.colors import LogNorm
-import matplotlib.patheffects as path_effects
+import os
 import numpy as np
 from progressbar import ProgressBar
 
+import matplotlib
+import matplotlib.pyplot as pl
+from matplotlib.colors import LogNorm
+import matplotlib.patheffects as path_effects
+import matplotlib.image as mimg
+
 from astropy import log
 from astropy.io import fits
+from astropy.wcs import WCS
+from astropy.visualization import AsymmetricPercentileInterval, SqrtStretch
 
-# Position of the CCDs: left-right = East-West and top-bottom = North-South;
-# the numbers refer to the FITS HDU extension number of an OmegaCam image.
-OMEGACAM_CCD_ARRANGEMENT = [32, 31, 30, 29, 16, 15, 14, 13,
-                            28, 27, 26, 25, 12, 11, 10,  9,
-                            24, 23, 22, 21,  8,  7,  6,  5,
-                            20, 19, 18, 17,  4,  3,  2,  1]
+from . import VPHAS_DATA_PATH, OMEGACAM_CCD_ARRANGEMENT
+from .footprint import VphasOffset
 
+
+##########
+# CLASSES
+##########
+
+class LuptonColorStretch():
+    """
+    Stretch a MxNx3 (RGB) array using the colour-preserving method by
+    Lupton et al. (arXiv:astro-ph/0312483).
+
+    Parameters
+    ----------
+    intensity_stretch : object derived from `BaseStretch`
+        The stretch to apply on the integrated intensity, e.g. `LogStretch`.
+    """
+    def __init__(self, intensity_stretch=None):
+        if intensity_stretch is None:
+            self.intensity_stretch = SqrtStretch()
+        else:
+            self.intensity_stretch = intensity_stretch
+
+    def __call__(self, values):
+        """Transform the image using this stretch.
+
+        Parameters
+        ----------
+        values : `~numpy.ndarray` of shape MxNx3 (RGB)
+            The input image, which should already be normalized to the [0:1]
+            range.
+
+        Returns
+        -------
+        new_values : `~numpy.ndarray`
+            The transformed values.
+        """
+        intensity = values.sum(axis=2) / 3.
+        old_settings = np.seterr(divide='ignore', invalid='ignore')
+        for channel in range(3):
+            values[:, :, channel] *= self.intensity_stretch(intensity) / intensity
+            values[:, :, channel][intensity == 0] = 0
+        np.seterr(**old_settings)
+        maxrgb = values.max(axis=2)
+        maxrgb_gt_1 = maxrgb > 1
+        for channel in range(3):
+            values[:, :, channel][maxrgb_gt_1] /= maxrgb[maxrgb_gt_1]
+        return values
+
+
+class VphasColourFrame():
+    """Create a pretty colour quicklook from a VPHAS frame.
+
+    Parameters
+    ----------
+    offset : str
+        Name of the VPHAS offset, e.g. "0001a".
+
+    ccd : int
+        CCD number, referring to the FITS extension number.
+    """
+    def __init__(self, offset, ccd):
+        self.offset = offset
+        self.ccd = ccd
+        self.filenames = VphasOffset(offset).get_filenames()
+
+    def as_array(self,
+                 interval_r=AsymmetricPercentileInterval(2.5, 99.0),
+                 interval_g=AsymmetricPercentileInterval(5., 99.2),
+                 interval_b=AsymmetricPercentileInterval(10., 99.2)):
+        """Returns the colour image as a MxNx3 (RGB) array."""
+        # First we determine the shifts
+        cx, cy = 2050, 1024  # central coordinates of the image
+        maxshiftx, maxshifty = 0, 0
+        cimg = {}
+        for idx, band in enumerate(self.filenames.keys()):
+            fn = self.filenames[band]
+            hdu = fits.open(os.path.join(VPHAS_DATA_PATH, fn))[self.ccd]
+            wcs = WCS(hdu.header)
+            img = hdu.data
+            if idx == 0:
+                cra, cdec = wcs.wcs_pix2world(cx, cy, 1)
+            else:
+                refx, refy = wcs.wcs_world2pix(cra, cdec, 1)
+                shiftx = int(refx - cx)
+                shifty = int(refy - cy)
+                maxshiftx = max(abs(shiftx), maxshiftx)
+                maxshifty = max(abs(shifty), maxshifty)
+                if shiftx > 0:
+                    img = np.pad(img, ((0, 0), (0, shiftx)), mode='constant')[:, shiftx:]
+                elif shiftx < 0:
+                    img = np.pad(img, ((0, 0), (-shiftx, 0)), mode='median')[:, :shiftx]            
+                if shifty > 0:
+                    img = np.pad(img, ((0, shifty), (0, 0)), mode='median')[shifty:, :]
+                elif shifty < 0:
+                    img = np.pad(img, ((-shifty, 0), (0, 0)), mode='constant')[:shifty, :]          
+            cimg[band] = img
+
+        r = interval_r(cimg['i'] + cimg['ha'])
+        g = interval_g(cimg['g'] + cimg['r'] + cimg['r2'])
+        b = interval_b(cimg['u'] + 2 * cimg['g'])
+        stacked = np.dstack((r[maxshifty:-maxshifty, maxshiftx:-maxshiftx],
+                             g[maxshifty:-maxshifty, maxshiftx:-maxshiftx],
+                             b[maxshifty:-maxshifty, maxshiftx:-maxshiftx]))
+        return LuptonColorStretch()(stacked)
+
+    def imsave(self, output_fn=None):
+        if output_fn is None:
+            output_fn = 'vphas-{0}-{1}.jpg'.format(self.offset, self.ccd)
+        log.info('Writing {0}'.format(output_fn))
+        mimg.imsave(output_fn, np.rot90(self.as_array()), origin='lower')
+
+
+############
+# FUNCTIONS
+############
+
+def vphas_quicklook(offset, ccd, output_fn=None):
+    VphasColourFrame(offset, ccd).imsave(output_fn)
 
 def vst_pawplot(filename, out_fn=None, dpi=100,
                 min_percent=1.0, max_percent=99.5,
@@ -154,4 +271,5 @@ def vst_pawplot_main(args=None):
 
 if __name__ == '__main__':
     # Example use:
-    vst_pawplot('/local/home/gb/tmp/vphas-201209/single/o20120918_00025.fit', '/tmp/test.jpg')
+    vst_pawplot(os.path.join(VPHAS_DATA_PATH, 'o20120918_00025.fit'), '/tmp/test.jpg')
+    vphas_quicklook("0778a", 24, "/tmp/test2.jpg")

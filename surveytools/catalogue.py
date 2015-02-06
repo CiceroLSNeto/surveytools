@@ -4,14 +4,14 @@ Classes
 -------
 VphasFrame
 VphasFrameCatalogue
-VphasOffset
+VphasOffsetCatalogue
 
 Example use
 -----------
 Create a photometric catalogue of VPHAS pointing 0149a:
 ```
 import vphas
-pointing = vphas.VphasOffset('0149a')
+pointing = vphas.VphasOffsetCatalogue('0149a')
 pointing.create_catalogue().write('mycatalogue.fits')
 ```
 
@@ -58,32 +58,14 @@ import photutils
 import photutils.morphology
 from photutils.background import Background
 
-from . import SURVEYTOOLS_DATA
+from . import SURVEYTOOLS_DATA, VPHAS_DATA_PATH, OMEGACAM_CCD_ARRANGEMENT, WORKDIR_PATH
 from .utils import cached_property, timed
+from .footprint import VphasOffset
 
-
-###########
-# CONSTANTS
-###########
-
-WORKDIR_DEFAULT = '/home/gb/tmp/vphas-workdir'  # Where can we store temporary files?
-# Directory containing the calibration frames (confmaps and flat fields)
-DATAPATH = '/home/gb/tmp/vphasdisk'
-CALIBDIR = os.path.join(DATAPATH, 'calib')
-DATADIR_DEFAULT = os.path.join(DATAPATH, 'single')
-OMEGACAM_CCD_ARRANGEMENT = [32, 31, 30, 29, 16, 15, 14, 13,
-                            28, 27, 26, 25, 12, 11, 10,  9,
-                            24, 23, 22, 21,  8,  7,  6,  5,
-                            20, 19, 18, 17,  4,  3,  2,  1]
 
 ###########
 # CLASSES
 ###########
-
-class NotObservedException(Exception):
-    """Raised if a requested field has not been observed yet."""
-    pass
-
 
 class VphasFrame(object):
     """Class representing a single-CCD image obtained by ESO's VST telescope.
@@ -103,7 +85,7 @@ class VphasFrame(object):
         Use a high-pass filter to subtract the background sky? (default: True)
     """
     def __init__(self, filename, extension=0, confidence_threshold=80.,
-                 subtract_sky=True, datadir=DATADIR_DEFAULT, workdir=WORKDIR_DEFAULT):
+                 subtract_sky=True, datadir=VPHAS_DATA_PATH, workdir=WORKDIR_PATH):
         if os.path.exists(filename):
             self.orig_filename = filename
         elif os.path.exists(os.path.join(datadir, filename)):
@@ -150,7 +132,7 @@ class VphasFrame(object):
         hdu = fts[self.orig_extension]
         fltr = fts[0].header['ESO INS FILT1 NAME']
         # Create bad pixel mask
-        self.confidence_map_path = os.path.join(CALIBDIR, hdu.header['CIR_CPM'].split('[')[0])
+        self.confidence_map_path = os.path.join(VPHAS_DATA_PATH, hdu.header['CIR_CPM'].split('[')[0])
         confmap_hdu = fits.open(self.confidence_map_path)[self.orig_extension]
         bad_pixel_mask = confmap_hdu.data < self.confidence_threshold
         # Estimate the background in a mesh of (41, 32) pixels; which is chosen
@@ -624,7 +606,7 @@ class VphasFrame(object):
                 mimg.imsave(psf_fn, np.log10(psfhdu.data), dpi=300, **imgstyle)
 
 
-class VphasOffset(object):
+class VphasOffsetCatalogue(object):
     """A pointing is a single (ra,dec) position in the sky.
 
     Parameters
@@ -634,7 +616,7 @@ class VphasOffset(object):
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
     """
-    def __init__(self, name, use_multiprocessing=True, workdir=WORKDIR_DEFAULT, **kwargs):
+    def __init__(self, name, use_multiprocessing=True, workdir=WORKDIR_PATH, **kwargs):
         if len(name) != 5 or not name.endswith(('a', 'b', 'c')):
             raise ValueError('Illegal pointing name. Expected a string of the form "0001a".')
         self.name = name
@@ -673,14 +655,15 @@ class VphasOffset(object):
         catalogue : `astropy.table.Table` object
         """
         # We do not tolerate red data missing
+        vo = VphasOffset()
         try:
-            images = self.get_red_filenames()
+            images = vo.get_red_filenames()
         except NotObservedException as e:
             log.error(e.message)
             return
         if include_ugr:
             try:
-                images.update(self.get_blue_filenames())
+                images.update(vo.get_blue_filenames())
             except NotObservedException as e:
                 log.warning(e.message)  # tolerate a missing blue concat
         log.debug('{0}: filenames found: {1}'.format(self.name, images))
@@ -860,84 +843,7 @@ class VphasOffset(object):
 
         return master_table, psf_table
 
-    def get_red_filenames(self):
-        """Returns the H-alpha, r- and i-band FITS filenames of the red concat.
 
-        Parameters
-        ----------
-        pointing : str
-            Identifier of the VPHAS field; must be a 5-character wide string
-            composed of a 4-digit zero padded number followed by 'a', 'b', 
-            or 'c' to denote the offset, e.g. '0149a' is the first offset
-            of field 'vphas_0149'.
-
-        Returns
-        -------
-        filenames : dict
-        """
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message='(.*)did not parse '
-                                                      'as fits unit(.*)')
-            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA,
-                                               'list-hari-image-files.fits'))
-        fieldname = 'vphas_' + self.name[:-1]
-        # Has the field been observed?
-        if (metadata['Field_1'] == fieldname).sum() == 0:
-            raise NotObservedException('{0} has not been observed in the red filters'.format(self.fieldname))
-        offset2idx = {'a': 0, 'b': -1, 'c': 1}
-        offset = offset2idx[self.name[-1:]]
-        # Define the colloquial band names used in the catalogue
-        filter2band = {'NB_659': 'ha', 'r_SDSS': 'r', 'i_SDSS': 'i'}
-        result = {}
-        for filtername, bandname in filter2band.iteritems():
-            mask = ((metadata['Field_1'] == fieldname)
-                    & (metadata['filter'] == filtername))
-            filenames = metadata['image file'][mask]
-            if filtername == 'NB_659':
-                assert len(filenames) == 3  # sanity check
-            else:
-                assert len(filenames) == 2  # sanity check
-            filenames.sort()
-            result[bandname] = filenames[offset]
-        return result
-
-    def get_blue_filenames(self):
-        """Returns the u-, g- and r-band FITS filenames of the blue concat.
-
-        Parameters
-        ----------
-        pointing : str
-            Identifier of the VPHAS field; must be a 5-character wide string
-            composed of a 4-digit zero padded number followed by 'a', 'b',
-            or 'c' to denote the offset, e.g. '0149a' is the first offset
-            of field 'vphas_0149'.
-
-        Returns
-        -------
-        filenames : dict
-        """
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message='(.*)did not parse '
-                                                      'as fits unit(.*)')
-            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-ugr-image-files.fits'))
-        fieldname = 'vphas_' + self.name[:-1]
-        # Has the field been observed?
-        if (metadata['Field_1'] == fieldname).sum() == 0:
-            raise NotObservedException('{0} has not been observed in the blue filters'.format(self.fieldname))
-        offset2idx = {'a': 0, 'b': -1, 'c': 1}
-        offset = offset2idx[self.name[-1:]]
-        # Define the colloquial band names used in the catalogue
-        filter2band = {'u_SDSS': 'u', 'g_SDSS': 'g', 'r_SDSS': 'r2'}
-        result = {}
-        for filtername, bandname in filter2band.iteritems():
-            mask = ((metadata['Field_1'] == fieldname)
-                    & (metadata['filter'] == filtername))
-            filenames = metadata['image file'][mask]
-            if filtername != 'g_SDSS':
-                assert len(filenames) == 2  # sanity check
-            filenames.sort()
-            result[bandname] = filenames[offset]
-        return result
 
 
 ############
