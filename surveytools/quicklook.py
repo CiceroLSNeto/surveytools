@@ -1,9 +1,4 @@
-"""Plot quicklook visualisations of VST/OmegaCAM data.
-
-Usage
------
-`vst-pawplot filename.fits`
-"""
+"""Tools to create quicklook visualisations of VST/OmegaCAM data."""
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
@@ -62,14 +57,14 @@ class LuptonColorStretch():
         """
         intensity = values.sum(axis=2) / 3.
         old_settings = np.seterr(divide='ignore', invalid='ignore')
-        for channel in range(3):
-            values[:, :, channel] *= self.intensity_stretch(intensity) / intensity
-            values[:, :, channel][intensity == 0] = 0
+        for chn in range(3):
+            values[:, :, chn] *= self.intensity_stretch(intensity) / intensity
+            values[:, :, chn][intensity == 0] = 0
         np.seterr(**old_settings)
         maxrgb = values.max(axis=2)
         maxrgb_gt_1 = maxrgb > 1
-        for channel in range(3):
-            values[:, :, channel][maxrgb_gt_1] /= maxrgb[maxrgb_gt_1]
+        for chn in range(3):
+            values[:, :, chn][maxrgb_gt_1] /= maxrgb[maxrgb_gt_1]
         return values
 
 
@@ -89,7 +84,8 @@ class VphasColourFrame():
         self.ccd = ccd
         self.filenames = VphasOffset(offset).get_filenames()
         if len(self.filenames) < 6:
-            raise NotObservedException('Not all six bands have been observed for {0}.'.format(offset))
+            raise NotObservedException('Not all six bands have been observed'
+                                       ' for offset {0}.'.format(offset))
 
     def as_array(self,
                  interval_r=AsymmetricPercentileInterval(2.5, 99.0),
@@ -99,33 +95,40 @@ class VphasColourFrame():
         # First we determine the shifts
         cx, cy = 2050, 1024  # central coordinates of the image
         maxshiftx, maxshifty = 0, 0
-        cimg = {}
+        aligned_imgs = {}
         for idx, band in enumerate(self.filenames.keys()):
             fn = self.filenames[band]
             hdu = fits.open(os.path.join(VPHAS_DATA_PATH, fn))[self.ccd]
             wcs = WCS(hdu.header)
             img = hdu.data
-            if idx == 0:
+            if idx == 0:  # The first image acts as reference
                 cra, cdec = wcs.wcs_pix2world(cx, cy, 1)
-            else:
+            else:  # For all subsequent images, compute the shift using the WCS
                 refx, refy = wcs.wcs_world2pix(cra, cdec, 1)
                 shiftx = int(refx - cx)
                 shifty = int(refy - cy)
+                # Now apply the required shift to the image
+                if shiftx > 0:
+                    img = np.pad(img, ((0, 0), (0, shiftx)),
+                                 mode=str('constant'))[:, shiftx:]
+                elif shiftx < 0:
+                    img = np.pad(img, ((0, 0), (-shiftx, 0)),
+                                 mode=str('constant'))[:, :shiftx]
+                if shifty > 0:
+                    img = np.pad(img, ((0, shifty), (0, 0)),
+                                 mode=str('constant'))[shifty:, :]
+                elif shifty < 0:
+                    img = np.pad(img, ((-shifty, 0), (0, 0)),
+                                 mode=str('constant'))[:shifty, :]
+                # The maximum shift applied will determine the final img shape
                 maxshiftx = max(abs(shiftx), maxshiftx)
                 maxshifty = max(abs(shifty), maxshifty)
-                if shiftx > 0:
-                    img = np.pad(img, ((0, 0), (0, shiftx)), mode=str('constant'))[:, shiftx:]
-                elif shiftx < 0:
-                    img = np.pad(img, ((0, 0), (-shiftx, 0)), mode=str('constant'))[:, :shiftx]            
-                if shifty > 0:
-                    img = np.pad(img, ((0, shifty), (0, 0)), mode=str('constant'))[shifty:, :]
-                elif shifty < 0:
-                    img = np.pad(img, ((-shifty, 0), (0, 0)), mode=str('constant'))[:shifty, :]          
-            cimg[band] = img
+            aligned_imgs[band] = img
         # New stretch, scale, and stack the data into an MxNx3 array
-        r = interval_r(cimg['i'] + cimg['ha'])
-        g = interval_g(cimg['g'] + cimg['r'] + cimg['r2'])
-        b = interval_b(cimg['u'] + 2 * cimg['g'])
+        r = interval_r(aligned_imgs['i'] + aligned_imgs['ha'])
+        g = interval_g(aligned_imgs['g'] + aligned_imgs['r']
+                       + aligned_imgs['r2'])
+        b = interval_b(aligned_imgs['u'] + 2 * aligned_imgs['g'])
         stacked = np.dstack((r[maxshifty:-maxshifty, maxshiftx:-maxshiftx],
                              g[maxshifty:-maxshifty, maxshiftx:-maxshiftx],
                              b[maxshifty:-maxshifty, maxshiftx:-maxshiftx]))
@@ -146,12 +149,11 @@ def vphas_quicklook(offset, ccd=None, out_fn=None):
     VphasColourFrame(offset, ccd).imsave(out_fn)
 
 
-
 def vphas_quicklook_main(args=None):
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Create a beautiful colour image from a single VPHAS frame.')
+        description='Create a beautiful color image from single VPHAS frames.')
     parser.add_argument('-o', '--output', metavar='filename',
                         type=str, default=None,
                         help='Filename for the output image (Default is a '
@@ -276,14 +278,17 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
     pl.close()
     del f
 
+
 def vst_pawplot_main(args=None):
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Create a beautiful plot showing the pixel data in a 32-CCD VST/OmegaCAM FITS file.')
-    parser.add_argument('-o', metavar='filename', type=str, default=None,
-                    help='Filename for the output image (Default is a '
-                    'PNG file with the same name as the FITS file)')
+        description='Create a beautiful plot showing the data for all 32 CCDs '
+                    'in a single image.')
+    parser.add_argument('-o', '--output', metavar='filename',
+                        type=str, default=None,
+                        help='Filename for the output image (Default is a '
+                        'PNG file with the same name as the FITS file)')
     parser.add_argument('--dpi', type=float, default=100.,
                         help=('The resolution of the output image.'))
     parser.add_argument('--min_percent', type=float, default=1.0,
@@ -312,5 +317,6 @@ def vst_pawplot_main(args=None):
 
 if __name__ == '__main__':
     # Example use:
-    vst_pawplot(os.path.join(VPHAS_DATA_PATH, 'o20120918_00025.fit'), '/tmp/test.jpg')
+    vst_pawplot(os.path.join(VPHAS_DATA_PATH, 'o20120918_00025.fit'),
+                '/tmp/test.jpg')
     vphas_quicklook("0778a", 24, "/tmp/test2.jpg")
