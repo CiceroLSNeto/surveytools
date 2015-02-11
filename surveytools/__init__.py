@@ -13,6 +13,8 @@ if os.environ.get('DISPLAY') is None:
 WORKDIR_PATH = '/home/gb/tmp/vphas-workdir'
 # Where are VPHAS reduced images and calibration frames?
 VPHAS_DATA_PATH = '/home/gb/tmp/vphasdisk'
+VPHAS_PIXEL_SCALE = 0.213  # arcsec/px, cf. OmegaCAM manual Sect 2.1
+VPHAS_BANDS = ['u', 'g', 'r2', 'ha', 'r', 'i']
 
 # Where is the data that comes with this package?
 SURVEYTOOLS_PATH = os.path.abspath(os.path.dirname(__file__))
