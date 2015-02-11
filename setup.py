@@ -15,9 +15,10 @@ setup(name='surveytools',
       packages=['surveytools'],
       install_requires=['numpy',
                         'matplotlib',
-                        'progressbar'
+                        'imageio',
+                        'progressbar',
                         'astropy',
-                        'astropy-photutils',
+                        'photutils',
                         'pyraf'],
       entry_points=entry_points,
       )
