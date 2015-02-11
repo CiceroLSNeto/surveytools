@@ -1,4 +1,4 @@
-"""Defines the VPHAS survey.
+"""Defines the VPHAS survey footprint.
 
 Example use
 -----------
@@ -17,6 +17,7 @@ import numpy as np
 
 from astropy.table import Table
 from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
 from astropy.io import fits
 from astropy import log
 
@@ -129,23 +130,27 @@ class VphasOffset():
             result[bandname] = filenames[idx]
         return result
 
-    def metadata(self):
-        fn = self.get_filenames()
-        meta = {}
-        for band in fn:
-            f = fits.open(os.path.join(VPHAS_DATA_PATH, fn[band]))
-            meta[band+'_filename'] = fn[band]
-            meta[band+'_ra'] = f[0].header['RA']
-            meta[band+'_dec'] = f[0].header['DEC']
+    @cached_property
+    def properties(self):
+        meta = {'name': self.name}
+        for band in self.image_filenames:
+            fn = self.image_filenames[band]
+            f = fits.open(os.path.join(VPHAS_DATA_PATH, fn))
+            meta[band+'_filename'] = fn
+            # The pointing center is near the SW corner of CCD #25;
+            # the inter-CCD gaps being roughly 88px (long side) and 46px (short side)
+            ra, dec = WCS(f[25].header).wcs_pix2world([-46/2.], [-88/2.], 1)
+            ra, dec = WCS(f[25].header).wcs_pix2world([0], [0], 1)
+            meta[band+'_ra'] = ra[0]
+            meta[band+'_dec'] = dec[0]
         return meta
 
 
-class VphasFootprint():
+class VphasPlannedFootprint():
 
     def __init__(self):
         pass
 
-    @timed
     def get_field_table(self, compute_corners=True):
         return Table.read(os.path.join(SURVEYTOOLS_DATA,
                                        'vphas-field-coordinates.csv'))
@@ -163,9 +168,9 @@ class VphasFootprint():
         cosdec = np.cos(np.radians(tbl['dec']))
         cntr = {'ra_a': tbl['ra'],
                 'dec_a': tbl['dec'],
-                'ra_b': tbl['ra'] - (588/3600.) * cosdec,
+                'ra_b': tbl['ra'] - (588/3600.) / cosdec,
                 'dec_b': tbl['dec'] + (660/3600.),
-                'ra_c': tbl['ra'] - (300/3600.) * np.cos(tbl['dec']),
+                'ra_c': tbl['ra'] - (300/3600.) / cosdec,
                 'dec_c': tbl['dec'] + (350/3600.),
                 }
         for pos in ['a', 'b', 'c']:  # Convert to Galactic
@@ -306,6 +311,10 @@ class VphasFootprint():
         return fig
 
 
+############
+# FUNCTIONS
+############
+
 def glon_formatter(l, tickno):
     if l < 0:
         l += 360
@@ -314,7 +323,19 @@ def glon_formatter(l, tickno):
 def glat_formatter(b, tickno):
     return '$%.0f^\circ$' % b
 
+def vphas_offset_name_generator():
+    """Generator function yielding all the names of the VPHAS offsets."""
+    for fieldno in np.arange(1, 2284+1):  # 2284 fields
+        for offset in ['a', 'b']:
+            yield '{0:04d}{1}'.format(fieldno, offset)
 
+def vphas_offset_generator():
+    """Generator function yielding all the VphasOffset objects."""
+    for name in vphas_offset_name_generator():
+        yield VphasOffset(name)
+
+
+# Dev testing
 if __name__ == '__main__':
     fp = VphasFootprint()
     #d = fp.get_field_dict()
