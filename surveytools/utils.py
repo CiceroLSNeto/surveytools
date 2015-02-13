@@ -13,13 +13,13 @@ def cached_property(method):
     """A cached version of the @property decorator."""
     def get(self):
         try:
-            return self._cache[method.func_name]
+            return self._cache[method.__name__]
         except AttributeError:
             self._cache = {}
-            x = self._cache[method.func_name] = method(self)
+            x = self._cache[method.__name__] = method(self)
             return x
         except KeyError:
-            x = self._cache[method.func_name] = method(self)
+            x = self._cache[method.__name__] = method(self)
             return x
     return property(get)
 

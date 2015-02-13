@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 import os
 
 # Use Agg if no DISPLAY is available
@@ -29,4 +31,4 @@ OMEGACAM_CCD_ARRANGEMENT = [32, 31, 30, 29, 16, 15, 14, 13,
                             20, 19, 18, 17,  4,  3,  2,  1]
 
 
-from catalogue import VphasFrame, VphasOffsetCatalogue
+from .catalogue import VphasFrame, VphasOffsetCatalogue

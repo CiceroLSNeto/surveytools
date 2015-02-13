@@ -88,7 +88,7 @@ class VphasOffset():
         # Define the colloquial band names used in the catalogue
         filter2band = {'NB_659': 'ha', 'r_SDSS': 'r', 'i_SDSS': 'i'}
         result = {}
-        for filtername, bandname in filter2band.iteritems():
+        for filtername, bandname in filter2band.items():
             mask = ((metadata['Field_1'] == fieldname)
                     & (metadata['filter'] == filtername))
             filenames = metadata['image file'][mask]
@@ -120,7 +120,7 @@ class VphasOffset():
         # Define the colloquial band names used in the catalogue
         filter2band = {'u_SDSS': 'u', 'g_SDSS': 'g', 'r_SDSS': 'r2'}
         result = {}
-        for filtername, bandname in filter2band.iteritems():
+        for filtername, bandname in filter2band.items():
             mask = ((metadata['Field_1'] == fieldname)
                     & (metadata['filter'] == filtername))
             filenames = metadata['image file'][mask]
@@ -144,6 +144,17 @@ class VphasOffset():
             meta[band+'_ra'] = ra[0]
             meta[band+'_dec'] = dec[0]
         return meta
+
+    def frametable(self):
+        """
+        for band in self.image_filenames:
+            for ccd in np.arange(range in fn[self.image_filenames]
+        
+        for filename in filenames:
+            for frame in frames:
+                obtain frame_corners, seeing, limmag, background level, qcgrade, indr
+                add to table
+        """
 
 
 class VphasPlannedFootprint():
