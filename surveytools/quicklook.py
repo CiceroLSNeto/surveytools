@@ -4,7 +4,7 @@ from __future__ import (absolute_import, division, print_function,
 
 import os
 import numpy as np
-from progressbar import ProgressBar
+import imageio
 
 import matplotlib
 import matplotlib.pyplot as pl
@@ -15,7 +15,8 @@ import matplotlib.image as mimg
 from astropy import log
 from astropy.io import fits
 from astropy.wcs import WCS
-from astropy.visualization import AsymmetricPercentileInterval, SqrtStretch
+from astropy.visualization import ManualInterval, AsymmetricPercentileInterval, SqrtStretch, LogStretch, AsinhStretch
+from astropy.utils.console import ProgressBar
 
 from . import VPHAS_DATA_PATH, OMEGACAM_CCD_ARRANGEMENT
 from .footprint import VphasOffset, NotObservedException
@@ -24,6 +25,9 @@ from .footprint import VphasOffset, NotObservedException
 ##########
 # CLASSES
 ##########
+
+class VphasDataException(Exception):
+    pass
 
 class LuptonColorStretch():
     """
@@ -37,7 +41,7 @@ class LuptonColorStretch():
     """
     def __init__(self, intensity_stretch=None):
         if intensity_stretch is None:
-            self.intensity_stretch = SqrtStretch()
+            self.intensity_stretch = AsinhStretch(a=0.03)
         else:
             self.intensity_stretch = intensity_stretch
 
@@ -124,11 +128,35 @@ class VphasColourFrame():
                 maxshiftx = max(abs(shiftx), maxshiftx)
                 maxshifty = max(abs(shifty), maxshifty)
             aligned_imgs[band] = img
+
+        if maxshiftx > cx or maxshifty > cy:
+            raise VphasDataException('{0}-{1}: bands do not overlap'.format(self.offset, self.ccd))
         # New stretch, scale, and stack the data into an MxNx3 array
-        r = interval_r(aligned_imgs['i'] + aligned_imgs['ha'])
-        g = interval_g(aligned_imgs['g'] + aligned_imgs['r']
-                       + aligned_imgs['r2'])
-        b = interval_b(aligned_imgs['u'] + 2 * aligned_imgs['g'])
+        r = aligned_imgs['i'] + aligned_imgs['ha']
+        g = aligned_imgs['g'] + aligned_imgs['r'] + aligned_imgs['r2']
+        b = aligned_imgs['u'] + 2 * aligned_imgs['g']
+        r, g, b = 1.5*r, 0.8*g, 2.2*b
+        vmin_r, vmax_r = np.percentile(r, [1., 99.5])
+        vmin_g, vmax_g = np.percentile(g, [5., 99.5])
+        vmin_b, vmax_b = np.percentile(b, [10., 99.5])
+        #log.info((vmin_r, vmin_g, vmin_b))
+        #log.info((vmax_r, vmax_g, vmax_b))
+        #if vmin_b < 100:
+        #    vmin_b = 100
+        minrange = np.max((1250., vmax_g-vmin_g, vmax_g-vmin_g, vmax_b-vmin_b))
+        if (vmax_r - vmin_r) < minrange:
+            vmax_r = vmin_r + minrange
+        if (vmax_g - vmin_g) < minrange:
+            vmax_g = vmin_g + minrange
+        if (vmax_b - vmin_b) < minrange:
+            vmax_b = vmin_b + minrange
+        interval_r = ManualInterval(vmin_r, vmax_r)
+        interval_g = ManualInterval(vmin_g, vmax_g)
+        interval_b = ManualInterval(vmin_b, vmax_b)
+        
+        r = interval_r(r)
+        g = interval_g(g)
+        b = interval_b(b)
         stacked = np.dstack((r[maxshifty:-maxshifty, maxshiftx:-maxshiftx],
                              g[maxshifty:-maxshifty, maxshiftx:-maxshiftx],
                              b[maxshifty:-maxshifty, maxshiftx:-maxshiftx]))
@@ -138,7 +166,9 @@ class VphasColourFrame():
         if out_fn is None:
             out_fn = 'vphas-{0}-{1}.jpg'.format(self.offset, self.ccd)
         log.info('Writing {0}'.format(out_fn))
-        mimg.imsave(out_fn, np.rot90(self.as_array()), origin='lower')
+        #mimg.imsave(out_fn, np.rot90(self.as_array()), origin='lower')
+        img = np.rot90(self.as_array())
+        imageio.imsave(out_fn, img, quality=90, optimize=True)
 
 
 ############
@@ -230,10 +260,11 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
     del sample  # save memory
     log.debug('vst_pawplot: vmin={0}, vmax={1}'.format(vmin, vmax))
     # Plot the extensions
-    pbar = ProgressBar(32).start()
-    for idx, hduno in enumerate(OMEGACAM_CCD_ARRANGEMENT):
+    idx = 0
+    for hduno in ProgressBar(OMEGACAM_CCD_ARRANGEMENT):
+        idx += 1
         log.debug('vst_pawplot: adding HDU #{0}'.format(hduno))
-        ax = fig.add_subplot(4, 8, idx+1)
+        ax = fig.add_subplot(4, 8, idx)
         sampling = int(500 / dpi)
         im = ax.matshow(f[hduno].data[::sampling, ::-sampling],
                         norm=LogNorm(vmin=vmin, vmax=vmax),
@@ -248,8 +279,6 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
             # Add a black border around the text
             txt.set_path_effects([path_effects.Stroke(linewidth=2, foreground='black'),
                                   path_effects.Normal()])
-        pbar.update(idx)
-    pbar.finish()
 
     # Aesthetics and colorbar
     fig.subplots_adjust(left=0.04, right=0.85,
@@ -285,7 +314,7 @@ def vst_pawplot_main(args=None):
     parser = argparse.ArgumentParser(
         description='Create a beautiful plot showing the data for all 32 CCDs '
                     'in a single image.')
-    parser.add_argument('-o', '--output', metavar='filename',
+    parser.add_argument('-o', metavar='filename',
                         type=str, default=None,
                         help='Filename for the output image (Default is a '
                         'PNG file with the same name as the FITS file)')
