@@ -3,7 +3,6 @@
 Classes
 -------
 VphasFrame
-VphasFrameCatalogue
 VphasOffsetCatalogue
 
 Example use

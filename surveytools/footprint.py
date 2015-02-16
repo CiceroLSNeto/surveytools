@@ -35,6 +35,31 @@ class NotObservedException(Exception):
     pass
 
 
+class VphasExposure():
+
+    def __init__(self, filename, directory=VPHAS_DATA_PATH):
+        self.path = os.path.join(directory, filename)
+
+    def frames(self):
+        """
+        pseudocode:
+        
+        for filename in filenames:
+            for frame in frames:
+                obtain frame_corners, seeing, limmag, background level, qcgrade, indr
+                add to table
+        """
+        #t = Table(names=(corners))
+        fts = fits.open(self.path)
+        for ccd in np.arange(1, 33):
+            xmax, ymax = fts[ccd].header['NAXIS1'], fts[ccd].header['NAXIS2']
+            corners = [[0, 0], [xmax, 0], [xmax, ymax], [0, ymax]]
+            wcs = WCS(fts[ccd].header)
+            mycorners = wcs.wcs_pix2world(corners, 1)
+            log.info(mycorners)
+        fts.close()
+
+
 class VphasOffset():
     """Provides filenames and meta data on VPHAS offset pointings.
 
@@ -144,17 +169,6 @@ class VphasOffset():
             meta[band+'_ra'] = ra[0]
             meta[band+'_dec'] = dec[0]
         return meta
-
-    def frametable(self):
-        """
-        for band in self.image_filenames:
-            for ccd in np.arange(range in fn[self.image_filenames]
-        
-        for filename in filenames:
-            for frame in frames:
-                obtain frame_corners, seeing, limmag, background level, qcgrade, indr
-                add to table
-        """
 
 
 class VphasPlannedFootprint():
