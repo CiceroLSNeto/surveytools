@@ -38,26 +38,72 @@ class NotObservedException(Exception):
 class VphasExposure():
 
     def __init__(self, filename, directory=VPHAS_DATA_PATH):
+        self.filename = filename
         self.path = os.path.join(directory, filename)
 
-    def frames(self):
+    @cached_property
+    def hdulist(self):
+        return fits.open(self.path)
+
+    @cached_property
+    def header(self):
+        """FITS header object."""
+        return self.hdulist[0].header
+
+    @cached_property
+    def offset_name(self):
+        """VPHAS name of the offset, e.g. '0001a'."""
+        field_number = self.header['ESO OBS NAME'].split('_')[1]
+        expno = self.header['ESO TPL EXPNO']
+        if expno == 1:
+            offset = 'a'
+        elif expno < self.header['ESO TPL NEXP']:
+            offset = 'b'
+        else:
+            offset ='c'
+        return '{0}{1}'.format(field_number, offset)
+
+    @cached_property
+    def band(self):
+        """Returns the colloquial band name.
+
+        VPHAS observations have an OBS NAME of the format "p88vphas_0149_uuna";
+        where the first two letters of the third part indicate the band name
         """
+        bandnames = {'uu': 'u', 'ug': 'g', 'ur': 'r2',
+                     'hh': 'ha', 'hr': 'r', 'hi': 'i'}
+        obsname = self.header['ESO OBS NAME']
+        return bandnames[obsname.split('_')[2][0:2]]
+
+    @cached_property
+    def name(self):
+        """VPHAS name of the exposure, e.g. '0001a-ha'."""
+        return '{0}-{1}'.format(self.offset_name, self.band)
+
+    def frames(self):
+        """Returns metadata about the 32 frames in the exposure.
+        
         pseudocode:
         
         for filename in filenames:
             for frame in frames:
-                obtain frame_corners, seeing, limmag, background level, qcgrade, indr
+                obtain frame_corners, seeing, limmag,
+                background level, qcgrade, indr
                 add to table
         """
-        #t = Table(names=(corners))
-        fts = fits.open(self.path)
+        tbl = Table(names=('frame', 'offset', 'ccd', 'band', 'filename', 'ra1', 'dec1', 'ra2', 'dec2', 'ra3', 'dec3', 'ra4', 'dec4'),
+                    dtype=('O', 'O', int, 'O', 'O', float, float, float, float, float, float, float, float))
         for ccd in np.arange(1, 33):
-            xmax, ymax = fts[ccd].header['NAXIS1'], fts[ccd].header['NAXIS2']
+            name = '{0}-{1}-{2}'.format(self.offset_name, ccd, self.band)
+            row = [name, self.offset_name, ccd, self.band, self.filename]
+            xmax, ymax = self.hdulist[ccd].header['NAXIS1'], self.hdulist[ccd].header['NAXIS2']
             corners = [[0, 0], [xmax, 0], [xmax, ymax], [0, ymax]]
-            wcs = WCS(fts[ccd].header)
+            wcs = WCS(self.hdulist[ccd].header)
             mycorners = wcs.wcs_pix2world(corners, 1)
-            log.info(mycorners)
-        fts.close()
+            for value in mycorners.reshape(8):
+                row.append(value)
+            tbl.add_row(row)
+        return tbl
 
 
 class VphasOffset():
