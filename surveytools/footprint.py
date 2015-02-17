@@ -149,7 +149,7 @@ class VphasOffset():
             warnings.filterwarnings("ignore", message='(.*)did not parse '
                                                       'as fits unit(.*)')
             metadata = Table.read(os.path.join(SURVEYTOOLS_DATA,
-                                               'list-hari-image-files.fits'))
+                                               'vphas-dr2-red-images.fits'))
         fieldname = 'vphas_' + self.name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
@@ -181,7 +181,7 @@ class VphasOffset():
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message='(.*)did not parse '
                                                       'as fits unit(.*)')
-            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'list-ugr-image-files.fits'))
+            metadata = Table.read(os.path.join(SURVEYTOOLS_DATA, 'vphas-dr2-blue-images.fits'))
         fieldname = 'vphas_' + self.name[:-1]
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
