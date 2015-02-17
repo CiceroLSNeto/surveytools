@@ -46,8 +46,13 @@ def timed(function):
 
 
 def angular_separation_degrees(lon1, lat1, lon2, lat2):
-    """Angular separation between two points on a sphere, with coordinates in degrees.
+    """Angular separation between two points on a sphere (input in degrees).
     
+    This function provides a fast alternative to AstroPy's great but somewhat
+    sluggish SkyCoord API. The function is adapted from 
+    `astropy.coordinates.angle_utilities.angular_separation`, which requires
+    the input and output to be in radians or to be Quantity objects.
+
     Parameters
     ----------
     lon1, lat1, lon2, lat2 : float
@@ -65,10 +70,6 @@ def angular_separation_degrees(lon1, lat1, lon2, lat2):
     some alternatives, but is stable at at all distances, including the
     poles and antipodes.
     .. [1] http://en.wikipedia.org/wiki/Great-circle_distance
-
-    This function is adapted from 
-    `astropy.coordinates.angle_utilities.angular_separation`,
-    which works with input and output in radians or Quantity objects.
     """
     lon1, lat1 = np.radians(lon1), np.radians(lat1)
     lon2, lat2 = np.radians(lon2), np.radians(lat2)
@@ -85,3 +86,60 @@ def angular_separation_degrees(lon1, lat1, lon2, lat2):
     denominator = slat1 * slat2 + clat1 * clat2 * cdlon
 
     return np.degrees(np.arctan2(np.sqrt(num1 ** 2 + num2 ** 2), denominator))
+
+
+def equ2gal(ra, dec):
+    """Converts Equatorial J2000d coordinates to the Galactic frame.
+
+    Note: it is better to use AstroPy's SkyCoord API for this.
+
+    Parameters
+    ----------
+    ra, dec : float, float [degrees]
+        Input J2000 coordinates (Right Ascension and Declination).
+
+    Returns
+    -------
+    glon, glat: float, float [degrees]
+    """
+    import math as m
+    from math import sin, cos, atan, asin, floor
+    OB = m.radians(23.4333334);
+    dec = m.radians(dec)
+    ra = m.radians(ra)
+    a = 27.128251 # The RA of the North Galactic Pole
+    d = 192.859481 # The declination of the North Galactic Pole
+    l = 32.931918 # The ascending node of the Galactic plane on the equator
+    sdec = sin(dec)
+    cdec = cos(dec)
+    sa = sin(m.radians(a))
+    ca = cos(m.radians(a))
+    GT = asin(cdec * ca * cos(ra - m.radians(d)) + sdec * sa)
+    GL = m.degrees(atan((sdec - sin(GT) * sa) / (cdec * sin(ra - m.radians(d)) * ca)))
+    TP = sdec - sin(GT) * sa
+    BT = cdec * sin(ra - m.radians(d)) * ca
+    if (BT < 0):
+        GL += 180
+    else:
+        if (TP < 0):
+            GL += 360  
+    GL += l
+    if (GL > 360):
+        GL -= 360
+    LG = floor(GL)
+    LM = floor((GL - floor(GL)) * 60)
+    LS = ((GL - floor(GL)) * 60 - LM) * 60
+    GT = m.degrees(GT)
+    D = abs(GT)
+    if (GT > 0):
+        BG = floor(D)
+    else:
+        BG = -1*floor(D)
+    BM = floor((D - floor(D)) * 60)
+    BS = ((D - floor(D)) * 60 - BM) * 60
+    if (GT < 0):
+        BM = -BM
+        BS = -BS
+    #if GL > 180:
+    #    GL -= 360
+    return (GL, GT)
