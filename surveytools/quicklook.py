@@ -225,7 +225,7 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
     out_fn : str
         The filename of the output bitmap image.  The type of bitmap
         is determined by the filename extension (e.g. '.jpg', '.png').
-        The default is a PNG file with the same name as the FITS file.
+        The default is a JPG file with the same name as the FITS file.
     dpi : float, optional [dots per inch]
         Resolution of the output 10-by-9 inch output bitmap.
         The default is 100.
@@ -242,7 +242,7 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
         Plot the HDU extension number if True (default: False).
     """
     if out_fn is None:
-        out_fn = filename + '.png'
+        out_fn = filename + '.jpg'
     if cmap not in pl.cm.datad.keys():
         raise ValueError('{0} is not a valid matplotlib colormap '
                          'name'.format(cmap))
@@ -286,7 +286,13 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
                         wspace=0.02, hspace=0.02)
     cbar_ax = fig.add_axes([0.9, 0.06, 0.02, 0.86])
     t = np.logspace(np.log10(vmin), np.log10(vmax), num=10)
-    cb = fig.colorbar(im, cax=cbar_ax, ticks=t, format='%.0f')
+    if (vmax - vmin) > 10:
+        fmt = '%.0f'
+    elif (vmax - vmin) > 1:
+        fmt = '%.1f'
+    else:
+        fmt = '%.2f'
+    cb = fig.colorbar(im, cax=cbar_ax, ticks=t, format=fmt)
     cb.set_label('Pixel count [ADU]')
     # Title and footer text
     fig.text(0.05, 0.95, filename, fontsize=16, ha='left')
