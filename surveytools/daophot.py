@@ -17,6 +17,7 @@ from astropy import log
 from astropy import table
 from astropy.table import Table
 from astropy.io import fits
+from astropy import wcs
 
 # Importing pyraf -- note that this requires IRAF to be installed
 # and the "iraf" and "IRAFARCH" environment variables to be set
@@ -462,12 +463,20 @@ class Daophot(object):
         self.get_allstar_table().write(self.catalogue_allstar,
                                        format='fits', overwrite=True)
 
+    def pix2world(self, x, y, origin=1):
+        """Shorthand to convert pixel(x,y) into equatorial(ra,dec) coordinates.
+
+        Use origin=1 if x/y positions were produced by IRAF/DAOPHOT,
+        0 if they were produced by astropy."""
+        img = self._path_cache['image_path'].rpartition('[')[0]
+        return wcs.WCS(fits.getheader(img)).wcs_pix2world(x, y, origin)
+
     def get_daofind_table(self):
         tbl = Table.read(self._path_cache['daofind_output'], format='daophot')
         # Convert pixel coordinates into ra/dec
-        ra, dec = self.image.pix2world(tbl['XCENTER'], tbl['YCENTER'], origin=1)
-        ra_col = Column(name='ra', data=ra)
-        dec_col = Column(name='dec', data=dec)
+        ra, dec = self.pix2world(tbl['XCENTER'], tbl['YCENTER'], origin=1)
+        ra_col = table.Column(name='ra', data=ra)
+        dec_col = table.Column(name='dec', data=dec)
         tbl.add_columns([ra_col, dec_col])
         return tbl
 
