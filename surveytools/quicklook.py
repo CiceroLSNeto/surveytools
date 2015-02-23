@@ -214,6 +214,7 @@ def vphas_quicklook_main(args=None):
 
 
 def vst_pawplot(filename, out_fn=None, dpi=100,
+                min_cut=None, max_cut=None,
                 min_percent=1.0, max_percent=99.5,
                 cmap='gist_heat', show_hdu=False):
     """Plots the 32-CCD OmegaCam mosaic as a pretty bitmap.
@@ -222,44 +223,64 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
     ----------
     filename : str
         The filename of the FITS file.
+
     out_fn : str
         The filename of the output bitmap image.  The type of bitmap
         is determined by the filename extension (e.g. '.jpg', '.png').
         The default is a JPG file with the same name as the FITS file.
+
     dpi : float, optional [dots per inch]
         Resolution of the output 10-by-9 inch output bitmap.
         The default is 100.
+
+    min_cut : float, optional
+        The pixel value of the minimum cut level.  Data values less than
+        ``min_cut`` will set to ``min_cut`` before scaling the image.
+        The default is the image minimum.  ``min_cut`` overrides
+        ``min_percent``.
+
+    max_cut : float, optional
+        The pixel value of the maximum cut level.  Data values greater
+        than ``min_cut`` will set to ``min_cut`` before scaling the
+        image.  The default is the image maximum.  ``max_cut`` overrides
+        ``max_percent``.
+
     min_percent : float, optional
         The percentile value used to determine the pixel value of
         minimum cut level.  The default is 1.0.
+
     max_percent : float, optional
         The percentile value used to determine the pixel value of
         maximum cut level.  The default is 99.5.
+
     cmap : str, optional
         The matplotlib color map name.  The default is 'gist_heat',
         can also be e.g. 'Greys_r'.
+
     show_hdu : boolean, optional
         Plot the HDU extension number if True (default: False).
     """
+    # Check input
     if out_fn is None:
         out_fn = filename + '.jpg'
+    log.info('Writing {0}'.format(out_fn))
     if cmap not in pl.cm.datad.keys():
         raise ValueError('{0} is not a valid matplotlib colormap '
                          'name'.format(cmap))
-    log.info('Writing {0}'.format(out_fn))
-    # Prepare the plot
+    # Determine the interval
     f = fits.open(filename)
+    if min_cut is not None or max_cut is not None:
+        vmin, vmax = min_cut or 0, max_cut or 65536
+    else:
+        # Determine vmin/vmax based on a sample of pixels across the mosaic
+        sample = np.concatenate([f[hdu].data[::200, ::100] for hdu
+                                 in [1, 6, 8, 12, 13, 20, 21, 23, 25, 27, 32]])
+        vmin, vmax = np.percentile(sample, [min_percent, max_percent])
+        del sample  # save memory
+    log.debug('vst_pawplot: vmin={0}, vmax={1}'.format(vmin, vmax))
+    # Setup the figure and plot the extensions
     pl.interactive(False)
     fig = pl.figure(figsize=(10, 9))
-    # Determine vmin/vmax based on a sample of pixels across the mosaic
-    sample = np.concatenate((f[1].data[::20, ::10],
-                             f[11].data[::20, ::10],
-                             f[22].data[::20, ::10],
-                             f[32].data[::20, ::10]))
-    vmin, vmax = np.percentile(sample, [min_percent, max_percent])
-    del sample  # save memory
-    log.debug('vst_pawplot: vmin={0}, vmax={1}'.format(vmin, vmax))
-    # Plot the extensions
     idx = 0
     for hduno in ProgressBar(OMEGACAM_CCD_ARRANGEMENT):
         idx += 1
@@ -279,7 +300,6 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
             # Add a black border around the text
             txt.set_path_effects([path_effects.Stroke(linewidth=2, foreground='black'),
                                   path_effects.Normal()])
-
     # Aesthetics and colorbar
     fig.subplots_adjust(left=0.04, right=0.85,
                         top=0.93, bottom=0.05,
@@ -308,13 +328,14 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
     except KeyError as e:
         log.warning('Could not write footer text: {0}'.format(e))
         pass
-    # We're done
+    # Save output and clean up
     fig.savefig(out_fn, dpi=dpi)
     pl.close()
     del f
 
 
 def vst_pawplot_main(args=None):
+    """Interface inspired by AstroPy's ``fits2bitmap`` script."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -326,6 +347,10 @@ def vst_pawplot_main(args=None):
                         'PNG file with the same name as the FITS file)')
     parser.add_argument('--dpi', type=float, default=100.,
                         help=('The resolution of the output image.'))
+    parser.add_argument('--min_cut', type=float, default=None,
+                        help='The pixel value of the minimum cut level')
+    parser.add_argument('--max_cut', type=float, default=None,
+                        help='The pixel value of the maximum cut level')
     parser.add_argument('--min_percent', type=float, default=1.0,
                         help=('The percentile value used to determine the '
                               'minimum cut level'))
@@ -344,6 +369,8 @@ def vst_pawplot_main(args=None):
         vst_pawplot(filename,
                     out_fn=args.o,
                     dpi=args.dpi,
+                    min_cut=args.min_cut,
+                    max_cut=args.max_cut,
                     min_percent=args.min_percent,
                     max_percent=args.max_percent,
                     cmap=args.cmap,
