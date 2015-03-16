@@ -338,7 +338,7 @@ class Daophot(object):
             self._path_cache['pstselect_output'] = output_path
 
     @timed
-    def psf(self, failsafe=True, norm_scatter_limit=0.05):
+    def psf(self, failsafe=True, norm_scatter_limit=0.1):
         """Runs the DAOPHOT PSF model fitting task.
 
         Parameters
@@ -388,7 +388,7 @@ class Daophot(object):
             iraf.daopars.varorder = 0
             attempts = 5
             for attempt_no, maxnpsf in enumerate(
-                np.linspace(orig_maxnpsf / 2, 3, attempts, dtype=int)):
+                np.linspace(max(orig_maxnpsf-10, 20), 10, attempts, dtype=int)):
                 # It's important to remove the PSF output file before repeating
                 # the fit, otherwise daophot will add a 2nd extension to it.
                 try:
@@ -559,7 +559,7 @@ def pstselect_prune(pstselect_output_path, new_path):
     from astropy.stats import sigma_clip
     for sigma in [2., 3., 4., 5., 10.]:
         bad_mask = sigma_clip(tbl['MSKY'].data, sig=sigma, iters=None).mask
-        if bad_mask.sum() < 0.5*len(tbl):  # stop if <50% rejected
+        if bad_mask.sum() < 0.3*len(tbl):  # stop if <30% rejected
             break
     log.info('Rejected {0} stars for PSF fitting ({1})'.format(
                  bad_mask.sum(), pstselect_output_path))

@@ -41,6 +41,7 @@ import warnings
 import tempfile
 import itertools
 import multiprocessing
+import configparser
 
 import numpy as np
 import matplotlib.pyplot as pl
@@ -52,6 +53,7 @@ from astropy import log
 from astropy import table
 from astropy.table import Table, Column
 from astropy.coordinates import SkyCoord
+from astropy.stats import sigma_clip
 import astropy.units as u
 from astropy.utils.timer import timefunc
 from astropy.visualization import ManualInterval, LogStretch
@@ -60,9 +62,9 @@ import photutils
 import photutils.morphology
 from photutils.background import Background
 
-from . import SURVEYTOOLS_DATA, VPHAS_DATA_PATH, OMEGACAM_CCD_ARRANGEMENT, WORKDIR_PATH
+from . import SURVEYTOOLS_CONFIGDIR, VPHAS_DATA_PATH, OMEGACAM_CCD_ARRANGEMENT, WORKDIR_PATH
 from .utils import cached_property, timed
-from .footprint import VphasOffset
+from . import footprint
 
 
 ###########
@@ -95,7 +97,8 @@ class VphasFrame(object):
         else:
             raise IOError('File not found:' + os.path.join(datadir, filename))
         self.orig_extension = extension
-        self.workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension), dir=workdir)
+        self.workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension),
+                                        dir=workdir)
         self._cache = {}
         self.confidence_threshold = confidence_threshold
         self.filename, self.extension = self._preprocess_image(subtract_sky=subtract_sky)
@@ -225,8 +228,8 @@ class VphasFrame(object):
 
     @cached_property
     def name(self):
-        """VPHAS name of the frame, e.g. '0001a-8-r'."""
-        return '{0}-{1}-{2}'.format(self.fieldname, self.orig_extension, self.band)
+        """VPHAS name of the frame, e.g. '0001a-r-8'."""
+        return '{0}-{1}-{2}'.format(self.fieldname, self.band, self.orig_extension)
 
     @cached_property
     def band(self):
@@ -457,7 +460,7 @@ class VphasFrame(object):
         tbl.add_columns([ra_col, dec_col])
         return tbl
 
-    def list_driven_photometry(self, ra, dec, ra_psf, dec_psf, **kwargs):
+    def photometry(self, ra, dec, ra_psf, dec_psf, **kwargs):
         """Computes PSF & aperture photometry for a list of sources.
 
         Parameters
@@ -560,7 +563,7 @@ class VphasFrame(object):
         return tbl[columns]
 
     @timed
-    def plot_images(self, image_fn, background_fn, sampling=1):
+    def plot_images(self, image_fn, bg_fn, sampling=1):
         """Plots quicklook bitmaps of the data and the background estimate.
 
         Parameters
@@ -568,7 +571,7 @@ class VphasFrame(object):
         image_fn : str
             Path to save the original ccd frame image.
 
-        background_fn : str
+        bg_fn : str
             Path to save the background estimation image.
 
         sampling : int (optional)
@@ -580,8 +583,8 @@ class VphasFrame(object):
                     'vmin': 0, 'vmax': 1}
         log.debug('Writing {0}'.format(image_fn))
         mimg.imsave(image_fn, transform(self.orig_hdu.data[::sampling, ::sampling]), **imgstyle)
-        log.debug('Writing {0}'.format(background_fn))
-        mimg.imsave(background_fn, transform(self.background_hdu.data[::sampling, ::sampling]), **imgstyle)
+        log.debug('Writing {0}'.format(bg_fn))
+        mimg.imsave(bg_fn, transform(self.background_hdu.data[::sampling, ::sampling]), **imgstyle)
 
     @timed
     def plot_subtracted_images(self, nosky_fn, nostars_fn, psf_fn, sampling=1):
@@ -639,14 +642,29 @@ class VphasOffsetCatalogue(object):
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
     """
-    def __init__(self, name, use_multiprocessing=True, workdir=WORKDIR_PATH, **kwargs):
+    def __init__(self, name, configfile=None, **kwargs):
+        # Offset name must be a string of the form "0001a".
         if len(name) != 5 or not name.endswith(('a', 'b', 'c')):
-            raise ValueError('Illegal pointing name. Expected a string of the form "0001a".')
+            raise ValueError('"{0}" is an illegal offset name. '
+                             'Expected a string of the form "0001a".'.format(name))
         self.name = name
-        self.workdir = tempfile.mkdtemp(prefix='{0}-'.format(name), dir=workdir)
         self.kwargs = kwargs
+        # Load the configuration
+        if configfile is None:
+            configfile = os.path.join(SURVEYTOOLS_CONFIGDIR,
+                                      'vphas-offset-catalogue-default.ini')
+        self.cfg = configparser.ConfigParser()
+        self.cfg.read(configfile)
+        # Make sure the root working directory exists
+        try:
+            os.mkdir(self.cfg['offset_catalogue']['workdir'])
+        except FileExistsError:
+            pass
+        # Make a subdir in the workingdir for this offset
+        self.workdir = tempfile.mkdtemp(prefix='{0}-'.format(name),
+                                        dir=self.cfg['offset_catalogue']['workdir'])
         # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
-        if use_multiprocessing:
+        if self.cfg['offset_catalogue'].getboolean('use_multiprocessing'):
             self.cpufarm = multiprocessing.Pool()
         else:
             self.cpufarm = itertools  # Simple sequential processing
@@ -660,6 +678,18 @@ class VphasOffsetCatalogue(object):
             self.cpufarm.terminate()
         except AttributeError:
             pass  # only applies to a multiprocessing.pool.Pool object
+
+    def _get_image_filenames(self, ccdlist=range(1, 33), include_ugr=True):
+        """Returns a dictionary mapping band names onto the image filenames."""
+        offset = footprint.VphasOffset(self.name)
+        image_fn = offset.get_red_filenames()
+        if include_ugr:
+            try:
+                image_fn.update(offset.get_blue_filenames())
+            except NotObservedException as e:
+                log.warning(e.message)  # tolerate a missing blue concat
+        log.debug('{0}: filenames found: {1}'.format(self.name, image_fn))
+        return image_fn
 
     @timed
     def create_catalogue(self, ccdlist=range(1, 33), include_ugr=True):
@@ -678,26 +708,19 @@ class VphasOffsetCatalogue(object):
         catalogue : `astropy.table.Table` object
         """
         with log.log_to_file(os.path.join(self.workdir, 'create_catalogue.log')):
-            # We do not tolerate red data missing
-            vo = VphasOffset(self.name)
             try:
-                images = vo.get_red_filenames()
+                image_fn = self._get_image_filenames(ccdlist=ccdlist, include_ugr=include_ugr)
             except NotObservedException as e:
+                # We do not tolerate red data missing
                 log.error(e.message)
                 return
-            if include_ugr:
-                try:
-                    images.update(vo.get_blue_filenames())
-                except NotObservedException as e:
-                    log.warning(e.message)  # tolerate a missing blue concat
-            log.debug('{0}: filenames found: {1}'.format(self.name, images))
             # Having obtained filenames, compute the catalogue for each ccd
             framecats = []
             for ccd in ccdlist:
-                framecats.append(self.create_ccd_catalogue(images=images, ccd=ccd))
+                framecats.append(self.create_ccd_catalogue(images=image_fn, ccd=ccd))
             catalogue = table.vstack(framecats, metadata_conflicts='silent')
             # Plot evaluation
-            self._plot_psf_overview(bands=images.keys())
+            self._plot_psf_overview(bands=image_fn.keys())
             # This is probably unnecessary
             import gc
             log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
@@ -756,7 +779,7 @@ class VphasOffsetCatalogue(object):
 
     @timed
     def create_ccd_catalogue(self, images, ccd=1):
-        """Main function to compute the catalogue, which will take a few minutes.
+        """Create a multi-band catalogue for the area covered by a single ccd.
 
         Parameters
         ----------
@@ -775,7 +798,8 @@ class VphasOffsetCatalogue(object):
         # Setup the working directory to store temporary files
         ccd_workdir = os.path.join(self.workdir, 'ccd-{0}'.format(ccd))
         os.mkdir(ccd_workdir)
-        log.info('{0}: started catalogueing ccd {1}, workdir: {2}'.format(self.name, ccd, ccd_workdir))
+        log.info('{0}: started catalogueing ccd {1}, '
+                 'workdir: {2}'.format(self.name, ccd, ccd_workdir))
 
         jobs = []
         for fn in images.values():
@@ -788,7 +812,7 @@ class VphasOffsetCatalogue(object):
         for frame in self.cpufarm.imap(frame_initialisation_task, jobs):
             frames[frame.band] = frame
         # Create a merged source table
-        source_table, psf_table = self.create_ccd_sourcelist(frames)
+        source_table, psf_table = self.run_source_detection(frames)
         with warnings.catch_warnings():
             # Attribute `keywords` cannot be written to FITS files
             warnings.filterwarnings("ignore", message='Attribute `keywords`(.*)')
@@ -802,9 +826,10 @@ class VphasOffsetCatalogue(object):
                       'dec': source_table['dec'],
                       'ra_psf': psf_table['ra'],
                       'dec_psf': psf_table['dec'],
+                      'cfg': self.cfg,
                       'workdir': ccd_workdir}
             jobs.append(params)
-        tables = [tbl for tbl in self.cpufarm.imap(list_driven_photometry_task, jobs)]
+        tables = [tbl for tbl in self.cpufarm.imap(photometry_task, jobs)]
 
         # Band-merge the tables
         merged = table.hstack(tables, metadata_conflicts='silent')
@@ -824,7 +849,7 @@ class VphasOffsetCatalogue(object):
         merged.write(output_filename, format='fits')
         return merged
 
-    def create_ccd_sourcelist(self, frames):
+    def run_source_detection(self, frames):
         """Creates a list of unique sources for a set of multi-band CCD frames.
 
         Parameters
@@ -836,8 +861,14 @@ class VphasOffsetCatalogue(object):
         -------
         sourcelist : `astropy.table.Table` object
         """
+        jobs = []
+        for frame in frames.values():
+            threshold = self.cfg['source_detection']['threshold_'+frame.band]
+            params = {'frame': frame,
+                      'cfg': self.cfg}
+            jobs.append(params)
         source_tables = {}
-        for tbl in self.cpufarm.imap(source_detection_task, frames.values()):
+        for tbl in self.cpufarm.imap(source_detection_task, jobs):
             source_tables[tbl.meta['band']] = tbl
         # Now merge the single-band lists into a master source table
         master_table = source_tables['i']
@@ -853,22 +884,35 @@ class VphasOffsetCatalogue(object):
                                         metadata_conflicts='silent')
         log.info('Found {0} candidate sources for the catalogue.'.format(len(master_table)))
 
-        # Determine sources suitable for PSF fitting
-        coordinates_i = SkyCoord(source_tables['i']['ra']*u.deg, source_tables['i']['dec']*u.deg)
-        mask_psfstars = source_tables['i']['CHI'] < 1.5
+        # Determine sources suitable for PSF fitting;
+        # we will use the i-band coordinates of sources with a good CHI-score;
+        # without a suspicious background value;
+        # that have been detected in all bands (bar u)
+        crd_i = SkyCoord(source_tables['i']['ra']*u.deg, source_tables['i']['dec']*u.deg)
+
+        # First, make sure the nearest neighbour is 3 arcsec away
+        idx, nneighbor_dist, dist3d = crd_i.match_to_catalog_sky(crd_i, nthneighbor=2)
+        mask_bad_template = ((nneighbor_dist < 2.*u.arcsec)
+                             | (source_tables['i']['CHI'] > 1.5))
+        # Then, sigma-clip on various properties
+        # in particular, outlying sky values point to suspect templates
+        for col in ['CHI', 'SHARPNESS', 'MSKY_PHOT', 'STDEV', 'SSKEW', 'NSREJ']:
+            mask_bad_template |= sigma_clip(source_tables['i'][col].data,
+                                            sig=3.0, iters=None).mask
+        # Finally, demand a detection in each band except u
         for band in frames.keys():
             if band in ['i', 'u']:  # do not require u to have the detection
                 continue
             new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
-            mask_reliable = source_tables[band]['CHI'] < 1.5
-            idx, sep2d, dist3d = coordinates_i.match_to_catalog_sky(new_coordinates[mask_reliable])
+            #mask_reliable = source_tables[band]['CHI'] < 1.5
+            idx, sep2d, dist3d = crd_i.match_to_catalog_sky(new_coordinates)
             # Star must exist in other band and have a good fit
-            mask_psfstars[sep2d > 0.5*u.arcsec] = False
-        psf_table = source_tables['i'][mask_psfstars]
-        log.info('Found {0} candidate stars for PSF model fitting.'.format(len(psf_table)))
+            mask_bad_template[sep2d > 0.5*u.arcsec] = True
 
+        psf_table = source_tables['i'][~mask_bad_template]
+        log.info('Found {0} candidate stars for PSF model fitting (rejected '
+                 '{1}).'.format(len(psf_table), mask_bad_template.sum()))
         return master_table, psf_table
-
 
 
 
@@ -880,43 +924,80 @@ class VphasOffsetCatalogue(object):
 def frame_initialisation_task(par):
     """Returns a `VphasFrame` instance for a given FITS filename/extension.
 
-    This is defined as a separate function to allow pickling for multiprocessing.
+    This is defined as a separate function with a single argument,
+    to allow pickling and hence the use of multiprocessing.map.
+
+    Parameters
+    ----------
+    par : dict
+        Parameters.
     """
-    log.debug('Creating VphasFrame instance for {0}[{1}]'.format(par['filename'], par['extension']))
+    log.debug('Creating VphasFrame instance for {0}[{1}]'.format(
+              par['filename'], par['extension']))
     frame = VphasFrame(par['filename'], par['extension'],
                        workdir=par['workdir'], **par['kwargs'])
     frame.populate_cache()
-    frame.plot_images(image_fn=os.path.join(par['workdir'],
-                                            frame.name+'-data.png'),
-                      background_fn=os.path.join(par['workdir'],
-                                                 frame.name+'-bg.png'))
+    frame.plot_images(image_fn=os.path.join(par['workdir'], frame.name+'-data.png'),
+                      bg_fn=os.path.join(par['workdir'], frame.name+'-bg.png'))
     return frame
 
 
-def source_detection_task(frame):
-    # 4 sigma is recommended by the DAOPHOT manual, but 3-sigma
-    # does appear to recover a bunch more genuine sources at SNR > 5.
-    thresholds = {'u': 5, 'g': 5, 'r2': 5, 'ha': 5, 'r': 5, 'i': 1}
+def source_detection_task(par):
+    """Returns a table of sources in a VphasFrame.
+
+    Parameters
+    ----------
+    par : dict
+        par['frame'] : `VphasFrame` instance
+        par['cfg'] : `ConfigParser` instance
+
+    Returns
+    -------
+    tbl : `astropy.table.Table` object
+        Sources detected in par['frame']
+    """
     # the psfrad and maxiter parameters were carefully chosen to speed
     # up source detection; psfrad_fwhm should be bigger for good photometry
-    tbl = frame.compute_source_table(roundlo=-0.75, roundhi=0.75,
-                                     psfrad_fwhm=3., maxiter=20,
-                                     threshold=thresholds[frame.band])
+    conf = par['cfg']['source_detection']
+    threshold = float(conf['threshold_' + par['frame'].band])
+    tbl = par['frame'].compute_source_table(
+                           roundlo=float(conf.get('roundlo', -0.75)),
+                           roundhi=float(conf.get('roundhi', 0.75)),
+                           psfrad_fwhm=float(conf.get('psfrad_fwhm', 3.)),
+                           maxiter=int(conf.get('maxiter', 20)),
+                           threshold=threshold)
     return tbl
 
 
-def list_driven_photometry_task(par):
-    # The high threshold value serves to aid the PSF fitting
-    tbl = par['frame'].list_driven_photometry(par['ra'], par['dec'],
-                                              ra_psf=par['ra_psf'],
-                                              dec_psf=par['dec_psf'],
-                                              psfrad_fwhm=8., maxiter=10,
-                                              mergerad_fwhm=0)
+def photometry_task(par):
+    """Returns a table with the photometry for a list of sources.
+
+    Parameters
+    ----------
+    par : dict
+        par['frame'] : `VphasFrame` instance
+        par['ra'] : RA coordinates of the sources to be measured
+        par['dec'] : Dec coordinates "
+        par['ra_psf'] : RA coordinates of good stars for PSF-fitting
+        par['dec_psf'] : Dec coordinates "
+        par['cfg'] : `ConfigParser` instance
+
+    Returns
+    -------
+    tbl : `astropy.table.Table` object
+        Photometry.
+    """
+    conf = par['cfg']['photometry']
+    tbl = par['frame'].photometry(par['ra'],
+                                  par['dec'],
+                                  ra_psf=par['ra_psf'],
+                                  dec_psf=par['dec_psf'],
+                                  psfrad_fwhm=float(conf.get('psfrad_fwhm', 8.)),
+                                  maxiter=int(conf.get('maxiter', 10)),
+                                  mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)))
     # Save the sky- and psf-subtracted images
-    nostars_fn = os.path.join(par['workdir'], par['frame'].name+'-nostars.png')
-    nosky_fn = os.path.join(par['workdir'], par['frame'].name+'-nosky.png')
-    psf_fn = os.path.join(par['workdir'], par['frame'].name+'-psf.png')
-    par['frame'].plot_subtracted_images(nostars_fn=nostars_fn,
-                                        nosky_fn=nosky_fn,
-                                        psf_fn=psf_fn)
+    fn = [os.path.join(par['workdir'], par['frame'].name+'-'+suffix+'.png')
+          for suffix in ['nostars', 'nosky', 'psf']]
+    par['frame'].plot_subtracted_images(nostars_fn=fn[0], nosky_fn=fn[1],
+                                        psf_fn=fn[2])
     return tbl
