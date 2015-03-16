@@ -21,6 +21,7 @@ VPHAS_BANDS = ['u', 'g', 'r2', 'ha', 'r', 'i']
 # Where is the data that comes with this package?
 SURVEYTOOLS_PATH = os.path.abspath(os.path.dirname(__file__))
 SURVEYTOOLS_DATA = os.path.join(SURVEYTOOLS_PATH, 'data')
+SURVEYTOOLS_CONFIGDIR = os.path.join(SURVEYTOOLS_PATH, 'config')
 
 # Position of the VST/OmegaCAM CCDs.
 # left-right = East-West and top-bottom = North-South;
