@@ -884,36 +884,34 @@ class VphasOffsetCatalogue(object):
                                         metadata_conflicts='silent')
         log.info('Found {0} candidate sources for the catalogue.'.format(len(master_table)))
 
-        # Determine sources suitable for PSF fitting;
-        # we will use the i-band coordinates of sources with a good CHI-score;
-        # without a suspicious background value;
-        # that have been detected in all bands (bar u)
+        # Determine sources suitable to act as templates for PSF fitting.
+        # We will use the i-band coordinates of sources that have been detected,
+        # and are deemed to be reliable, clean, isolated sources, in all bands.
         crd_i = SkyCoord(source_tables['i']['ra']*u.deg, source_tables['i']['dec']*u.deg)
 
-        # First, make sure the nearest neighbour is 3 arcsec away
+        # First, make sure the nearest i-band neighbour is not within 2 arcsec.
         idx, nneighbor_dist, dist3d = crd_i.match_to_catalog_sky(crd_i, nthneighbor=2)
-        mask_bad_template = ((nneighbor_dist < 2.*u.arcsec)
-                             | (source_tables['i']['CHI'] > 1.5))
-        # Then, sigma-clip on various properties
-        # in particular, outlying sky values point to suspect templates
-        for col in ['CHI', 'SHARPNESS', 'MSKY_PHOT', 'STDEV', 'SSKEW', 'NSREJ']:
-            mask_bad_template |= sigma_clip(source_tables['i'][col].data,
-                                            sig=3.0, iters=None).mask
-        # Finally, demand a detection in each band except u
-        for band in frames.keys():
-            if band in ['i', 'u']:  # do not require u to have the detection
-                continue
-            new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
-            #mask_reliable = source_tables[band]['CHI'] < 1.5
-            idx, sep2d, dist3d = crd_i.match_to_catalog_sky(new_coordinates)
-            # Star must exist in other band and have a good fit
-            mask_bad_template[sep2d > 0.5*u.arcsec] = True
+        mask_bad_template = nneighbor_dist < 2.*u.arcsec
 
+        # Second, demand a reliable detection in each band within 0.5 arcsec
+        for band in frames.keys():
+            # Sigma-clip on quality indicators.  In particular, outlying sky
+            # values often mark spurious templates in the wings of bright stars.
+            for col in ['CHI', 'SHARPNESS', 'MSKY_PHOT', 'STDEV', 'SSKEW', 'NSREJ']:
+                mask_bad = sigma_clip(source_tables[band][col].data,
+                                      sig=3.0, iters=None).mask
+            if band == 'i':
+                mask_bad_template[mask_bad] = True
+            else:
+                crd_band = SkyCoord(source_tables[band]['ra'][~mask_bad]*u.deg,
+                                    source_tables[band]['dec'][~mask_bad]*u.deg)
+                idx, sep2d, dist3d = crd_i.match_to_catalog_sky(crd_band)
+                mask_bad_template[sep2d > 0.5*u.arcsec] = True
+        
         psf_table = source_tables['i'][~mask_bad_template]
         log.info('Found {0} candidate stars for PSF model fitting (rejected '
                  '{1}).'.format(len(psf_table), mask_bad_template.sum()))
         return master_table, psf_table
-
 
 
 ############
@@ -965,6 +963,7 @@ def source_detection_task(par):
                            roundhi=float(conf.get('roundhi', 0.75)),
                            psfrad_fwhm=float(conf.get('psfrad_fwhm', 3.)),
                            maxiter=int(conf.get('maxiter', 20)),
+                           maxnpsf=int(conf.get('maxnpsf', 20)),
                            threshold=threshold)
     return tbl
 
@@ -994,6 +993,7 @@ def photometry_task(par):
                                   dec_psf=par['dec_psf'],
                                   psfrad_fwhm=float(conf.get('psfrad_fwhm', 8.)),
                                   maxiter=int(conf.get('maxiter', 10)),
+                                  maxnpsf=int(conf.get('maxnpsf', 60)),
                                   mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)))
     # Save the sky- and psf-subtracted images
     fn = [os.path.join(par['workdir'], par['frame'].name+'-'+suffix+'.png')
