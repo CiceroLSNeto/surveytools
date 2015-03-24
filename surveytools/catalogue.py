@@ -287,17 +287,10 @@ class VphasFrame(object):
     def datamin(self):
         """Returns the minimum good pixel value. [adu]
         
-        In the broad-bands, we tolerate up to 10-sigma below the average sky
-        level, which is very permissive because images may contain strong 
-        background gradients.  In narrowband H-alpha (NB_659), we fix the
-        minimum value at 1 because astrophysical nebulosity may trigger
-        exceptionally strong gradients.
+        We tolerate up to 5-sigma below the average sky level.
         """
         # What is the minimum good pixel value? 
-        skymin = self.sky - 10 * self.sky_sigma
-        if skymin < 0 or self.filtername == 'NB_659':
-            skymin = 0
-        return skymin
+        return self.sky - 5 * self.sky_sigma
 
     @cached_property
     def datamax(self):
@@ -308,10 +301,10 @@ class VphasFrame(object):
         The saturation level is not exactly 2^16 = 65536 due to bias subtraction etc,
         so we conservatively ignore pixel values over 55000 ADU.
 
-        It is VERY important to be conservative, because the cores of saturated
-        stars should be avoided during PSF fitting. Experience suggests
-        that charge bleeding may cause pixels well below the nominal
-        saturation level to give an unrepresentative view of the PSF.
+        It is VERY important to be conservative when choosing PSF template
+        stars, because the cores of saturated stars should be avoided at all
+        cost. Charge bleeding may cause pixels well below the nominal saturation
+        level to give an unrepresentative view of the PSF.
         """
         return 55000
 
@@ -889,9 +882,12 @@ class VphasOffsetCatalogue(object):
         # and are deemed to be reliable, clean, isolated sources, in all bands.
         crd_i = SkyCoord(source_tables['i']['ra']*u.deg, source_tables['i']['dec']*u.deg)
 
-        # First, make sure the nearest i-band neighbour is not within 2 arcsec.
+        # First, make sure the PSF template stars have no nearby neighbour;
+        # the cutoff distance is adaptive (70% percentile).
         idx, nneighbor_dist, dist3d = crd_i.match_to_catalog_sky(crd_i, nthneighbor=2)
-        mask_bad_template = nneighbor_dist < 2.*u.arcsec
+        cutoff = np.percentile(nneighbor_dist, 70) * nneighbor_dist.unit
+        log.info('PSF neighbour limit = {0:.2f}.'.format(cutoff.to(u.arcsec)))
+        mask_bad_template = nneighbor_dist < cutoff
 
         # Second, demand a reliable detection in each band within 0.5 arcsec
         for band in frames.keys():
@@ -959,12 +955,18 @@ def source_detection_task(par):
     conf = par['cfg']['source_detection']
     threshold = float(conf['threshold_' + par['frame'].band])
     tbl = par['frame'].compute_source_table(
+                           threshold=threshold,
                            roundlo=float(conf.get('roundlo', -0.75)),
                            roundhi=float(conf.get('roundhi', 0.75)),
                            psfrad_fwhm=float(conf.get('psfrad_fwhm', 3.)),
+                           fitrad_fwhm=float(conf.get('fitrad_fwhm', 1.)),
                            maxiter=int(conf.get('maxiter', 20)),
                            maxnpsf=int(conf.get('maxnpsf', 20)),
-                           threshold=threshold)
+                           varorder=int(conf.get('varorder', 0)),
+                           mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)),                         
+                           annulus_fwhm=float(conf.get('annulus_fwhm', 4.)),
+                           dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.))
+                           )
     return tbl
 
 
@@ -992,9 +994,14 @@ def photometry_task(par):
                                   ra_psf=par['ra_psf'],
                                   dec_psf=par['dec_psf'],
                                   psfrad_fwhm=float(conf.get('psfrad_fwhm', 8.)),
+                                  fitrad_fwhm=float(conf.get('fitrad_fwhm', 1.)),
                                   maxiter=int(conf.get('maxiter', 10)),
                                   maxnpsf=int(conf.get('maxnpsf', 60)),
-                                  mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)))
+                                  varorder=int(conf.get('varorder', 0)),
+                                  mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)),
+                                  annulus_fwhm=float(conf.get('annulus_fwhm', 4.)),
+                                  dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.))
+                                  )
     # Save the sky- and psf-subtracted images
     fn = [os.path.join(par['workdir'], par['frame'].name+'-'+suffix+'.png')
           for suffix in ['nostars', 'nosky', 'psf']]

@@ -63,13 +63,14 @@ class Daophot(object):
         pass  # shutil.rmtree(self.workdir)
 
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
-                    fitsky='yes', function='moffat25', fwhmpsf=3., itime=10.,
+                    fitsky='no', function='moffat25', fwhmpsf=3., itime=10.,
                     maxiter=50, maxnpsf=60, mergerad_fwhm=2., nclean=10,
                     psfrad_fwhm=10., ratio=1., readnoi=0, recenter='yes',
-                    roundlo=-1.0, roundhi=1.0, sannulus_fwhm=2., 
+                    roundlo=-1.0, roundhi=1.0,
                     saturated='no', sharplo=0.2, sharphi=1.0,
                     sigma=5., theta=0., threshold=3., varorder=1, zmag=20.,
-                    wsannulus_fwhm=2.):
+                    sannulus_fwhm=2., wsannulus_fwhm=2.,
+                    annulus_fwhm=10., dannulus_fwhm=2.):
         """Sets the IRAF/DAOPHOT configuration parameters.
 
         Parameters
@@ -94,7 +95,7 @@ class Daophot(object):
             current fit for the star and and estimating the median of the
             pixels in the annulus defined by sannulus and wsannulus.
             The new group sky value is the average of the new individual
-            values. (default: 'yes')
+            values. (default: 'no')
 
         function : str (optional)
             PSF model function. One of "auto", "gauss", "moffat15", "moffat25",
@@ -215,8 +216,8 @@ class Daophot(object):
         # The annulus should lie outside the psfrad to get the prettiest
         # subtracted image, but putting the annulus far from the star might
         # cause trouble in case of a spatially variable background!
-        iraf.fitskypars.annulus = iraf.daopars.psfrad
-        iraf.fitskypars.dannulus = 3 * fwhmpsf
+        iraf.fitskypars.annulus = annulus_fwhm * fwhmpsf # iraf.daopars.psfrad
+        iraf.fitskypars.dannulus = dannulus_fwhm * fwhmpsf # 2 * fwhmpsf
         # Non data-dependent parameters
         iraf.daopars.recenter = recenter
         iraf.daopars.nclean = nclean
