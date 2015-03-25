@@ -62,10 +62,12 @@ import photutils
 import photutils.morphology
 from photutils.background import Background
 
-from . import SURVEYTOOLS_CONFIGDIR, VPHAS_DATA_PATH, OMEGACAM_CCD_ARRANGEMENT, WORKDIR_PATH
+from . import SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT
 from .utils import cached_property, timed
 from . import footprint
 
+
+DEFAULT_CONFIG = os.path.join(SURVEYTOOLS_CONFIGDIR, 'vphas-offset-catalogue-default.ini')
 
 ###########
 # CLASSES
@@ -81,27 +83,20 @@ class VphasFrame(object):
 
     extension : int (optional)
         Extension of the image in the FITS file. (default: 0)
-
-    confidence_threshold : float (optional)
-        Pixels with a confidence lower than the threshold will be masked out
-
-    subtract_sky : boolean (optional)
-        Use a high-pass filter to subtract the background sky? (default: True)
     """
-    def __init__(self, filename, extension=0, confidence_threshold=80.,
-                 subtract_sky=True, datadir=VPHAS_DATA_PATH, workdir=WORKDIR_PATH):
+    def __init__(self, filename, extension=0, cfg=None):
         if os.path.exists(filename):
             self.orig_filename = filename
-        elif os.path.exists(os.path.join(datadir, filename)):
-            self.orig_filename = os.path.join(datadir, filename)
+        elif os.path.exists(os.path.join(cfg['vphas']['datadir'], filename)):
+            self.orig_filename = os.path.join(cfg['vphas']['datadir'], filename)
         else:
-            raise IOError('File not found:' + os.path.join(datadir, filename))
+            raise IOError('File not found:' + os.path.join(cfg['vphas']['datadir'], filename))
         self.orig_extension = extension
+        self.cfg = cfg
         self.workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension),
-                                        dir=workdir)
+                                        dir=cfg['vphas']['workdir'])
         self._cache = {}
-        self.confidence_threshold = confidence_threshold
-        self.filename, self.extension = self._preprocess_image(subtract_sky=subtract_sky)
+        self.filename, self.extension = self._preprocess_image()
 
     def __del__(self):
         #del self._cache['daophot']
@@ -118,58 +113,71 @@ class VphasFrame(object):
         return self.__dict__
 
     @timed
-    def _preprocess_image(self, subtract_sky=True, mask_bad_pixels=True):
+    def _preprocess_image(self):
         """Prepare the image for photometry by IRAF.
 
         IRAF/DAOPHOT does not appears to support RICE-compressed files,
         and does not allow a weight (confidence) map to be provided.
-        This method hence saves the image to an uncompressed FITS file in
-        which low-confidence areas are masked out, suitable for
-        analysis by IRAF tasks.  This method will also subtract the
-        background estimated using a high-pass filter.
+        This method works around these limitations by saving the image
+        to an uncompressed FITS file in which low-confidence areas are masked
+        out (by assigning a pixel value of -1 ADU). The new file generated
+        by this produce is then suitable for analysis by IRAF/DAOPHOT tasks.
+
+        Moreover, this method also subtracts the background to enable the
+        source detection to be carried out using the assumption of a smooth
+        background. The background is estimated using a high-pass filter.
 
         Returns
         -------
         (filename, extension): (str, int)
             Path and HDU number of the pre-processed FITS file.
         """ 
+        # Open the pipeline-processed image data
         fts = fits.open(self.orig_filename)
         hdu = fts[self.orig_extension]
         fltr = fts[0].header['ESO INS FILT1 NAME']
-        # Create bad pixel mask
-        self.confidence_map_path = os.path.join(VPHAS_DATA_PATH, hdu.header['CIR_CPM'].split('[')[0])
+        # Twilight flats of the VST are known to be affected by scattered light
+        # a separate illumination correction map is used to correct for this.
+        if self.cfg['catalogue'].getboolean('apply_illumcor', True):
+            illumcor_fn = hdu.header['FLATSRC'].replace('flat', 'illum').split('[')[0]
+            illumcor_path = os.path.join(self.cfg['vphas']['datadir'], illumcor_fn)
+            hdu_illumcor = fits.open(illumcor_path)[self.orig_extension]
+            log.debug('{0}: applying illumcor: {1}'.format(fltr, illumcor_fn))
+            imgdata = hdu.data * hdu_illumcor.data
+        else:
+            imgdata = hdu.data
+        # Open the confidence map and create bad pixel mask
+        self.confidence_map_path = os.path.join(self.cfg['vphas']['datadir'],
+                                                hdu.header['CIR_CPM'].split('[')[0])
         confmap_hdu = fits.open(self.confidence_map_path)[self.orig_extension]
-        bad_pixel_mask = confmap_hdu.data < self.confidence_threshold
+        minconf = float(self.cfg['catalogue'].get('confidence_threshold', 80.))
+        bad_pixel_mask = confmap_hdu.data < minconf
         # Estimate the background in a mesh of (41, 32) pixels; which is chosen
         # to fit an integer number of times in the image size (4100, 2048).
         # At the pixel scale of 0.21 arcsec/px, this corresponds to ~10 arcsec.
-        bg = Background(hdu.data, (41, 32), filter_shape=(6, 6),
+        bg = Background(imgdata, (41, 32), filter_shape=(6, 6),
                         mask=bad_pixel_mask,
                         method='median', sigclip_sigma=3., sigclip_iters=5)
         log.debug('{0} sky estimate = {1:.1f} +/- {2:.1f}'.format(
                   fltr, bg.background_median, bg.background_rms_median))
         self.sky = bg.background_median
         self.sky_sigma = bg.background_rms_median
-
-        # Subtract the background
-        if subtract_sky:
-            # ensure the median level remains the same
-            imgdata = hdu.data - (bg.background - bg.background_median)
-        else:
-            imgdata = hdu.data
-        # Apply bad pixel mask
-        if mask_bad_pixels:
+        # Subtract the background, retaining the median sky level
+        if self.cfg['catalogue'].getboolean('subtract_sky', True):
+            imgdata -= (bg.background - bg.background_median)
+        # Apply bad pixel mask (will only work if IRAF's DATAMIN > -1)
+        if self.cfg['catalogue'].getboolean('mask_bad_pixels', True):
             imgdata[bad_pixel_mask] = -1
-        # Write the sky-subtracted, bad-pixel-masked image to a new FITS file which IRAF can understand
+        # Write the processed image to an uncompressed FITS file for IRAF
         path = os.path.join(self.workdir, '{0}.fits'.format(fltr))
-        log.debug('Writing background-subtracted image to {0}'.format(path))
+        log.debug('Writing {0}'.format(os.path.basename(path)))
         newhdu = fits.PrimaryHDU(imgdata, hdu.header)
         newhdu.header.extend(fts[0].header, unique=True)
-        del newhdu.header['RADECSYS']  # non-standard keyword
+        del newhdu.header['RADECSYS']  # non-standard keyword; raises errors
         newhdu.writeto(path)
-        # Also write the background frame
+        # Also write the background frame as a diagnostic
         self.background_path = os.path.join(self.workdir, '{0}-bg.fits'.format(fltr))
-        log.debug('Writing background image to {0}'.format(self.background_path))
+        log.debug('Writing {0}'.format(os.path.basename(self.background_path)))
         newhdu = fits.PrimaryHDU(bg.background, hdu.header)
         newhdu.writeto(self.background_path)
         # Return the pre-processed image filename and extension
@@ -289,8 +297,12 @@ class VphasFrame(object):
         
         We tolerate up to 5-sigma below the average sky level.
         """
-        # What is the minimum good pixel value? 
-        return self.sky - 5 * self.sky_sigma
+        datamin = self.sky - 5 * self.sky_sigma
+        # Ensure datamin is positive, because `_preprocess_image` masks out
+        # bad pixels by assigning a negative value to them.
+        if datamin < 0:
+            return 0.
+        return datamin
 
     @cached_property
     def datamax(self):
@@ -394,7 +406,6 @@ class VphasFrame(object):
     def daophot(self, **kwargs):
         """Returns a Daophot object, pre-configured to work on the image."""
         image_path = '{0}[{1}]'.format(self.filename, self.extension)
-        log.debug('{0}: starting a new daophot session for file {1}'.format(self.band, image_path))
         from .daophot import Daophot
         dp = Daophot(image_path, workdir=self.workdir,
                      datamin=self.datamin, datamax=self.datamax,
@@ -574,9 +585,9 @@ class VphasFrame(object):
         transform = LogStretch() + ManualInterval(vmin, vmax)
         imgstyle = {'cmap': pl.cm.gist_heat, 'origin': 'lower',
                     'vmin': 0, 'vmax': 1}
-        log.debug('Writing {0}'.format(image_fn))
+        log.debug('Writing {0}'.format(os.path.basename(image_fn)))
         mimg.imsave(image_fn, transform(self.orig_hdu.data[::sampling, ::sampling]), **imgstyle)
-        log.debug('Writing {0}'.format(bg_fn))
+        log.debug('Writing {0}'.format(os.path.basename(bg_fn)))
         mimg.imsave(bg_fn, transform(self.background_hdu.data[::sampling, ::sampling]), **imgstyle)
 
     @timed
@@ -603,7 +614,7 @@ class VphasFrame(object):
         imgstyle = {'cmap': pl.cm.gist_heat, 'origin': 'lower',
                     'vmin': 0, 'vmax': 1}
         # Sky-subtracted image
-        log.debug('Writing {0}'.format(nosky_fn))
+        log.debug('Writing {0}'.format(os.path.basename(nosky_fn)))
         mimg.imsave(nosky_fn, transform(self.data[::sampling, ::sampling]),
                     **imgstyle)
         # PSF-subtracted image
@@ -611,7 +622,7 @@ class VphasFrame(object):
             log.warning('Failed to plot the psf-subtracted image, '
                         'you need to call daophot.allstar first.')
         else:
-            log.debug('Writing {0}'.format(nostars_fn))
+            log.debug('Writing {0}'.format(os.path.basename(nostars_fn)))
             subhdu = fits.open(self._cache['daophot_subimage_path'])[0]
             mimg.imsave(nostars_fn,
                         transform(subhdu.data[::sampling, ::sampling]),
@@ -635,29 +646,27 @@ class VphasOffsetCatalogue(object):
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
     """
-    def __init__(self, name, configfile=None, **kwargs):
+    def __init__(self, name, config=DEFAULT_CONFIG, **kwargs):
         # Offset name must be a string of the form "0001a".
         if len(name) != 5 or not name.endswith(('a', 'b', 'c')):
             raise ValueError('"{0}" is an illegal offset name. '
                              'Expected a string of the form "0001a".'.format(name))
         self.name = name
         self.kwargs = kwargs
-        # Load the configuration
-        if configfile is None:
-            configfile = os.path.join(SURVEYTOOLS_CONFIGDIR,
-                                      'vphas-offset-catalogue-default.ini')
+        # Read the configuration
+        self.config = config
         self.cfg = configparser.ConfigParser()
-        self.cfg.read(configfile)
+        self.cfg.read(config)
         # Make sure the root working directory exists
         try:
-            os.mkdir(self.cfg['offset_catalogue']['workdir'])
+            os.mkdir(self.cfg['vphas']['workdir'])
         except FileExistsError:
             pass
         # Make a subdir in the workingdir for this offset
         self.workdir = tempfile.mkdtemp(prefix='{0}-'.format(name),
-                                        dir=self.cfg['offset_catalogue']['workdir'])
+                                        dir=self.cfg['vphas']['workdir'])
         # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
-        if self.cfg['offset_catalogue'].getboolean('use_multiprocessing'):
+        if self.cfg['catalogue'].getboolean('use_multiprocessing', True):
             self.cpufarm = multiprocessing.Pool()
         else:
             self.cpufarm = itertools  # Simple sequential processing
@@ -672,11 +681,11 @@ class VphasOffsetCatalogue(object):
         except AttributeError:
             pass  # only applies to a multiprocessing.pool.Pool object
 
-    def _get_image_filenames(self, ccdlist=range(1, 33), include_ugr=True):
+    def _get_image_filenames(self, ccdlist=range(1, 33)):
         """Returns a dictionary mapping band names onto the image filenames."""
         offset = footprint.VphasOffset(self.name)
         image_fn = offset.get_red_filenames()
-        if include_ugr:
+        if self.cfg['catalogue'].getboolean('include_ugr', True):
             try:
                 image_fn.update(offset.get_blue_filenames())
             except NotObservedException as e:
@@ -685,7 +694,7 @@ class VphasOffsetCatalogue(object):
         return image_fn
 
     @timed
-    def create_catalogue(self, ccdlist=range(1, 33), include_ugr=True):
+    def create_catalogue(self, ccdlist=range(1, 33)):
         """Main function to create the catalogue.
 
         Parameters
@@ -693,16 +702,13 @@ class VphasOffsetCatalogue(object):
         ccdlist : list of ints (optional)
             Specify the HDU extension numbers to use. (default: all CCDs)
 
-        include_ugr : bool (optional)
-            Include ugr (blue concat) data if available? (default: True)
-
         Returns
         -------
         catalogue : `astropy.table.Table` object
         """
         with log.log_to_file(os.path.join(self.workdir, 'create_catalogue.log')):
             try:
-                image_fn = self._get_image_filenames(ccdlist=ccdlist, include_ugr=include_ugr)
+                image_fn = self._get_image_filenames(ccdlist=ccdlist)
             except NotObservedException as e:
                 # We do not tolerate red data missing
                 log.error(e.message)
@@ -717,6 +723,7 @@ class VphasOffsetCatalogue(object):
             # This is probably unnecessary
             import gc
             log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
+            log.info('{0} finished, diagnostic files are in {1}'.format(self.name, self.workdir))
             # Returns the catalogue as an astropy table
             return catalogue
 
@@ -766,7 +773,7 @@ class VphasOffsetCatalogue(object):
             fig.tight_layout()
 
             output_fn = os.path.join(self.workdir, 'psf-{0}.png'.format(band))
-            log.info('{0}: Writing {1}'.format(self.name, output_fn))
+            log.info('{0}: Writing {1}'.format(self.name, os.path.basename(output_fn)))
             fig.savefig(output_fn, dpi=120, facecolor='black')
             pl.close(fig)
 
@@ -799,6 +806,7 @@ class VphasOffsetCatalogue(object):
             params = {'filename': fn,
                       'extension': ccd,
                       'workdir': ccd_workdir,
+                      'cfg': self.cfg,
                       'kwargs': self.kwargs}
             jobs.append(params)
         frames = {}
@@ -886,6 +894,8 @@ class VphasOffsetCatalogue(object):
         # the cutoff distance is adaptive (70% percentile).
         idx, nneighbor_dist, dist3d = crd_i.match_to_catalog_sky(crd_i, nthneighbor=2)
         cutoff = np.percentile(nneighbor_dist, 70) * nneighbor_dist.unit
+        if cutoff > 5*u.arcsec:
+            cutoff = 5.*u.arcsec  # Don't be too strict in sparse fields
         log.info('PSF neighbour limit = {0:.2f}.'.format(cutoff.to(u.arcsec)))
         mask_bad_template = nneighbor_dist < cutoff
 
@@ -929,7 +939,7 @@ def frame_initialisation_task(par):
     log.debug('Creating VphasFrame instance for {0}[{1}]'.format(
               par['filename'], par['extension']))
     frame = VphasFrame(par['filename'], par['extension'],
-                       workdir=par['workdir'], **par['kwargs'])
+                       cfg=par['cfg'], **par['kwargs'])
     frame.populate_cache()
     frame.plot_images(image_fn=os.path.join(par['workdir'], frame.name+'-data.png'),
                       bg_fn=os.path.join(par['workdir'], frame.name+'-bg.png'))

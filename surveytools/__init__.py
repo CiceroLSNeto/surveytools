@@ -11,8 +11,6 @@ if os.environ.get('DISPLAY') is None:
 # CONSTANTS
 ###########
 
-# Where can we store temporary files?
-WORKDIR_PATH = '/home/gb/tmp/vphas-workdir'
 # Where are VPHAS reduced images and calibration frames?
 VPHAS_DATA_PATH = '/home/gb/tmp/vphasdisk'
 VPHAS_PIXEL_SCALE = 0.213  # arcsec/px, cf. OmegaCAM manual Sect 2.1
