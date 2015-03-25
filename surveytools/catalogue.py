@@ -62,8 +62,8 @@ import photutils
 import photutils.morphology
 from photutils.background import Background
 
-from . import SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT
-from .utils import cached_property, timed
+from . import SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT, VPHAS_PIXEL_SCALE
+from .utils import cached_property, timed, coalesce
 from . import footprint
 
 
@@ -81,10 +81,12 @@ class VphasFrame(object):
     filename : str
         Path to the image FITS file.
 
+    cfg : `ConfigParser` object
+
     extension : int (optional)
         Extension of the image in the FITS file. (default: 0)
     """
-    def __init__(self, filename, extension=0, cfg=None):
+    def __init__(self, filename, extension=0, cfg=None, workdir=None):
         if os.path.exists(filename):
             self.orig_filename = filename
         elif os.path.exists(os.path.join(cfg['vphas']['datadir'], filename)):
@@ -92,9 +94,19 @@ class VphasFrame(object):
         else:
             raise IOError('File not found:' + os.path.join(cfg['vphas']['datadir'], filename))
         self.orig_extension = extension
-        self.cfg = cfg
+        # Setup configuration
+        if cfg is None:
+            self.cfg = configparser.ConfigParser()
+            self.cfg.read(DEFAULT_CONFIG)
+        else:
+            self.cfg = cfg
+        # Setup the workdir
+        if workdir is None:
+            workdir_root = cfg['vphas']['workdir']
+        else:
+            workdir_root = workdir
         self.workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension),
-                                        dir=cfg['vphas']['workdir'])
+                                        dir=workdir_root)
         self._cache = {}
         self.filename, self.extension = self._preprocess_image()
 
@@ -141,9 +153,10 @@ class VphasFrame(object):
         if self.cfg['catalogue'].getboolean('apply_illumcor', True):
             illumcor_fn = hdu.header['FLATSRC'].replace('flat', 'illum').split('[')[0]
             illumcor_path = os.path.join(self.cfg['vphas']['datadir'], illumcor_fn)
-            hdu_illumcor = fits.open(illumcor_path)[self.orig_extension]
+            illumcor_hdu = fits.open(illumcor_path)[self.orig_extension]
             log.debug('{0}: applying illumcor: {1}'.format(fltr, illumcor_fn))
-            imgdata = hdu.data * hdu_illumcor.data
+            imgdata = hdu.data * illumcor_hdu.data
+            del illumcor_hdu  # Free memory
         else:
             imgdata = hdu.data
         # Open the confidence map and create bad pixel mask
@@ -152,6 +165,7 @@ class VphasFrame(object):
         confmap_hdu = fits.open(self.confidence_map_path)[self.orig_extension]
         minconf = float(self.cfg['catalogue'].get('confidence_threshold', 80.))
         bad_pixel_mask = confmap_hdu.data < minconf
+        del confmap_hdu  # Free memory
         # Estimate the background in a mesh of (41, 32) pixels; which is chosen
         # to fit an integer number of times in the image size (4100, 2048).
         # At the pixel scale of 0.21 arcsec/px, this corresponds to ~10 arcsec.
@@ -164,7 +178,7 @@ class VphasFrame(object):
         self.sky_sigma = bg.background_rms_median
         # Subtract the background, retaining the median sky level
         if self.cfg['catalogue'].getboolean('subtract_sky', True):
-            imgdata -= (bg.background - bg.background_median)
+            imgdata = imgdata - (bg.background - bg.background_median)
         # Apply bad pixel mask (will only work if IRAF's DATAMIN > -1)
         if self.cfg['catalogue'].getboolean('mask_bad_pixels', True):
             imgdata[bad_pixel_mask] = -1
@@ -175,11 +189,13 @@ class VphasFrame(object):
         newhdu.header.extend(fts[0].header, unique=True)
         del newhdu.header['RADECSYS']  # non-standard keyword; raises errors
         newhdu.writeto(path)
+        del newhdu  # Free memory
         # Also write the background frame as a diagnostic
         self.background_path = os.path.join(self.workdir, '{0}-bg.fits'.format(fltr))
         log.debug('Writing {0}'.format(os.path.basename(self.background_path)))
         newhdu = fits.PrimaryHDU(bg.background, hdu.header)
         newhdu.writeto(self.background_path)
+        del newhdu  # Free memory
         # Return the pre-processed image filename and extension
         return (path, 0)
 
@@ -418,7 +434,7 @@ class VphasFrame(object):
         self._cache['daophot'] = dp
         return dp
 
-    def compute_source_table(self, threshold=3., chi_max=5., **kwargs):
+    def compute_source_table(self, threshold=3., **kwargs):
         """Returns a table of sources in the frame, with initial photometry.
 
         This method will execute the full DAOPHOT pipeline of source detection,
@@ -443,16 +459,18 @@ class VphasFrame(object):
             output from initial (rough) aperture and PSF photometry.
         """
         dp = self.daophot(threshold=threshold, **kwargs)
-        sources = dp.do_psf_photometry()             
-        mask = (
-                (sources['SNR'] > threshold)
-                & (np.abs(sources['SHARPNESS']) < 1)
-                & (sources['CHI'] < chi_max)
-                & (sources['PIER_ALLSTAR'] == 0)
-                & (sources['PIER_PHOT'] == 0)
-                )
+        sources = dp.do_psf_photometry()
+        chi_max = float(self.cfg['sourcelist'].get('chi_max', 5.))
+        sharp_max = float(self.cfg['sourcelist'].get('sharp_max', 1.))
+        mask_accept = (
+                        (sources['SNR'] > threshold)
+                        & (np.abs(sources['SHARPNESS']) < sharp_max)
+                        & (sources['CHI'] < chi_max)
+                        & (sources['PIER_ALLSTAR'] == 0)
+                        & (sources['PIER_PHOT'] == 0)
+                        )
         sources.meta['band'] = self.band
-        tbl = sources[mask]
+        tbl = sources[mask_accept]
         log.info('Identified {0} sources in {1} at sigma > {2}'.format(
                      len(tbl), self.band, threshold))
         # Add ra/dec columns
@@ -498,7 +516,6 @@ class VphasFrame(object):
 
         dp = self.daophot(**kwargs)
         # Fit the PSF model
-        #dp.daofind()
         dp.apphot(coords=psf_tbl_filename)
         dp.pstselect()
         psf_scatter = dp.psf()
@@ -512,6 +529,7 @@ class VphasFrame(object):
         # The code below transforms the table into a user-friendly format
         tbl = dp.get_allstar_phot_table()
         tbl.meta['band'] = self.band
+        tbl.meta[self.band + 'PsfRms'] = psf_scatter
         # Add celestial coordinates ra/dec as columns
         ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
                                  tbl['YCENTER_ALLSTAR'],
@@ -539,31 +557,61 @@ class VphasFrame(object):
                                  (tbl[self.band+'SNR'] < 3)
                                  | (tbl[self.band] > tbl[self.band+'MagLim'])
                               )
-            tbl[self.band][mask_too_faint] = np.nan
-            tbl[self.band+'Err'][mask_too_faint] = np.nan
-            tbl[self.band+'AperMag'][mask_too_faint] = np.nan
-            tbl[self.band+'AperMagErr'][mask_too_faint] = np.nan
-            # Shift of the source centroid during PSF fitting [pixels]
+            tbl[self.band].mask[mask_too_faint] = True
+            tbl[self.band+'Err'].mask[mask_too_faint] = True
+            tbl[self.band+'AperMag'].mask[mask_too_faint] = True
+            tbl[self.band+'AperMagErr'].mask[mask_too_faint] = True
+            # Shift of the source centroid during PSF fitting [arcsec]
             tbl[self.band+'Shift'] = np.hypot(tbl[self.band+'X'] - tbl['XINIT'],
                                               tbl[self.band+'Y'] - tbl['YINIT'])
-            tbl[self.band+'DetectionID'] = ['{0}-{1}'.format(self.name, idx) for idx in tbl[self.band+'ID']]
+            id_prefix = (
+                         os.path.basename(self.orig_filename)
+                            .replace('o', '')
+                            .replace('_', '-')
+                            .replace('.fit', '')
+                        )
+            tbl[self.band+'DetectionID'] = ['{0}-{1}-{2}'.format(id_prefix, self.orig_extension, idx) for idx in tbl[self.band+'ID']]
+
+            # Sources need to be fitted without error, the position should not
+            # have shifted, and the CHI score must be decent. If any of these
+            # conditions is not met, the PSF magnitude is put to NaN.
+            chi_max = float(self.cfg['photometry'].get('chi_max', 3.))
+            shift_max = float(self.cfg['photometry'].get('shift_max', 1.))
+            mask_bad_fit = (
+                            np.isnan(tbl[self.band].filled(np.nan))
+                            | (tbl[self.band + 'Pier'].filled(0) != 0)
+                            | (tbl[self.band + 'Chi'].filled(999) > chi_max)
+                            | (tbl[self.band + 'Shift'].filled(999) > shift_max)
+                        )
+            for suffix in ['', 'Err', 'Ra', 'Dec']:
+                tbl[self.band+suffix].mask[mask_bad_fit] = True 
+                
+            # The "10sig" quality flag helps the user select good sources
             tbl[self.band+'10sig'] = (
-                                (~np.isnan(tbl[self.band].filled(np.nan)))
-                                & (tbl[self.band + 'SNR'] > 10)
-                                & (tbl[self.band + 'Pier'] == 0)
-                                & (tbl[self.band + 'Chi'] < 1.5)
-                                & (tbl[self.band + 'Shift'] < 1)
-                                 )
-            tbl[self.band+'PsfScatter'] = [psf_scatter] * len(tbl)
+                                        ~tbl[self.band].mask
+                                        & (tbl[self.band + 'Err'].filled(999) < 0.1)
+                                        & (tbl[self.band + 'SNR'].filled(-999) > 10)
+                                        & (tbl[self.band + 'Chi'].filled(999) < 1.5)
+                                     )
+
         # Finally, specify the columns to keep and their order
-        columns = [self.band+'DetectionID', self.band+'ID',
-                   self.band+'X', self.band+'Y',
-                   self.band+'Ra', self.band+'Dec',
-                   self.band, self.band+'Err', self.band+'Chi',
-                   self.band+'Pier', self.band+'Perror',
-                   self.band+'AperMag', self.band+'AperMagErr',
-                   self.band+'SNR', self.band+'MagLim',
-                   self.band+'Shift', self.band+'10sig']
+        columns = [self.band+'DetectionID',
+                   self.band+'ID',
+                   self.band+'X',
+                   self.band+'Y',
+                   self.band+'Ra',
+                   self.band+'Dec',
+                   self.band,
+                   self.band+'Err',
+                   self.band+'Chi',
+                   self.band+'Pier',
+                   self.band+'Perror',
+                   self.band+'AperMag',
+                   self.band+'AperMagErr',
+                   self.band+'SNR',
+                   self.band+'MagLim',
+                   self.band+'Shift',
+                   self.band+'10sig']
         return tbl[columns]
 
     @timed
@@ -670,6 +718,8 @@ class VphasOffsetCatalogue(object):
             self.cpufarm = multiprocessing.Pool()
         else:
             self.cpufarm = itertools  # Simple sequential processing
+        # Save diagnostic plots and tables?
+        self.save_diagnostics = self.cfg['catalogue'].getboolean('save_diagnostics', True)
 
     def __del__(self):
         """Destructor."""
@@ -709,8 +759,7 @@ class VphasOffsetCatalogue(object):
         with log.log_to_file(os.path.join(self.workdir, 'create_catalogue.log')):
             try:
                 image_fn = self._get_image_filenames(ccdlist=ccdlist)
-            except NotObservedException as e:
-                # We do not tolerate red data missing
+            except NotObservedException as e:  # No data for this field!
                 log.error(e.message)
                 return
             # Having obtained filenames, compute the catalogue for each ccd
@@ -718,12 +767,12 @@ class VphasOffsetCatalogue(object):
             for ccd in ccdlist:
                 framecats.append(self.create_ccd_catalogue(images=image_fn, ccd=ccd))
             catalogue = table.vstack(framecats, metadata_conflicts='silent')
-            # Plot evaluation
-            self._plot_psf_overview(bands=image_fn.keys())
+            if self.save_diagnostics:
+                self._plot_psf_overview(bands=image_fn.keys())
             # This is probably unnecessary
             import gc
             log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
-            log.info('{0} finished, diagnostic files are in {1}'.format(self.name, self.workdir))
+            log.info('{0} finished, workdir was {1}'.format(self.name, self.workdir))
             # Returns the catalogue as an astropy table
             return catalogue
 
@@ -814,14 +863,19 @@ class VphasOffsetCatalogue(object):
             frames[frame.band] = frame
         # Create a merged source table
         source_table, psf_table = self.run_source_detection(frames)
-        with warnings.catch_warnings():
-            # Attribute `keywords` cannot be written to FITS files
-            warnings.filterwarnings("ignore", message='Attribute `keywords`(.*)')
-            source_table.write(os.path.join(ccd_workdir, 'sourcelist.fits'))
-            psf_table.write(os.path.join(ccd_workdir, 'psflist.fits'))
+        if self.save_diagnostics:
+            with warnings.catch_warnings():
+                # Attribute `keywords` cannot be written to FITS files
+                warnings.filterwarnings("ignore", message='Attribute `keywords`(.*)')
+                source_table.write(os.path.join(ccd_workdir, 'sourcelist.fits'))
+                psf_table.write(os.path.join(ccd_workdir, 'psflist.fits'))
         # Carry out the PSF photometry using the source table created above
+        if 'u' in frames:
+            bandorder = ['u', 'g', 'r', 'i', 'ha', 'r2']  # sort columns by lambda
+        else: # sometimes the blue concat is missing
+            bandorder = ['r', 'i', 'ha']
         jobs = []
-        for band in frames:
+        for band in bandorder:
             params = {'frame': frames[band],
                       'ra': source_table['ra'],
                       'dec': source_table['dec'],
@@ -834,11 +888,20 @@ class VphasOffsetCatalogue(object):
 
         # Band-merge the tables
         merged = table.hstack(tables, metadata_conflicts='silent')
+        if 'u' in frames:
+            merged['ra'] = coalesce((merged['iRa'], merged['rRa'], merged['r2Ra'],
+                                     merged['gRa'], merged['haRa'], merged['uRa']))
+            merged['dec'] = coalesce((merged['iDec'], merged['rDec'], merged['r2Dec'],
+                                      merged['gDec'], merged['haDec'], merged['uDec']))
+        else:
+            merged['ra'] = coalesce((merged['iRa'], merged['rRa'], merged['haRa']))
+            merged['dec'] = coalesce((merged['iDec'], merged['rDec'], merged['haDec']))
+        # Add extra fields
         merged['field'] = self.name
         merged['ccd'] = ccd
         merged['rmi'] = merged['r'] - merged['i']
         merged['rmha'] = merged['r'] - merged['ha']
-        if 'u' in merged.colnames:
+        if 'u' in frames:
             merged['umg'] = merged['u'] - merged['g']
             merged['gmr'] = merged['g'] - merged['r']
             merged['a10'] = (merged['u10sig'].filled(False)
@@ -846,8 +909,14 @@ class VphasOffsetCatalogue(object):
                              & merged['r10sig'].filled(False)
                              & merged['i10sig'].filled(False)
                              & merged['ha10sig'].filled(False))
-        output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
-        merged.write(output_filename, format='fits')
+        else:
+            merged['a10'] = (merged['r10sig'].filled(False)
+                             & merged['i10sig'].filled(False)
+                             & merged['ha10sig'].filled(False))
+        # As well as returning the catalogue as a `Table`, write it to disk
+        if self.save_diagnostics:
+            output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
+            merged.write(output_filename, format='fits')
         return merged
 
     def run_source_detection(self, frames):
@@ -864,7 +933,7 @@ class VphasOffsetCatalogue(object):
         """
         jobs = []
         for frame in frames.values():
-            threshold = self.cfg['source_detection']['threshold_'+frame.band]
+            threshold = self.cfg['sourcelist']['threshold_'+frame.band]
             params = {'frame': frame,
                       'cfg': self.cfg}
             jobs.append(params)
@@ -938,8 +1007,8 @@ def frame_initialisation_task(par):
     """
     log.debug('Creating VphasFrame instance for {0}[{1}]'.format(
               par['filename'], par['extension']))
-    frame = VphasFrame(par['filename'], par['extension'],
-                       cfg=par['cfg'], **par['kwargs'])
+    frame = VphasFrame(par['filename'], par['extension'], cfg=par['cfg'],
+                       workdir=par['workdir'], **par['kwargs'])
     frame.populate_cache()
     frame.plot_images(image_fn=os.path.join(par['workdir'], frame.name+'-data.png'),
                       bg_fn=os.path.join(par['workdir'], frame.name+'-bg.png'))
@@ -962,7 +1031,7 @@ def source_detection_task(par):
     """
     # the psfrad and maxiter parameters were carefully chosen to speed
     # up source detection; psfrad_fwhm should be bigger for good photometry
-    conf = par['cfg']['source_detection']
+    conf = par['cfg']['sourcelist']
     threshold = float(conf['threshold_' + par['frame'].band])
     tbl = par['frame'].compute_source_table(
                            threshold=threshold,

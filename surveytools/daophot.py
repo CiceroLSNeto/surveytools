@@ -562,8 +562,7 @@ def pstselect_prune(pstselect_output_path, new_path):
         bad_mask = sigma_clip(tbl['MSKY'].data, sig=sigma, iters=None).mask
         if bad_mask.sum() < 0.3*len(tbl):  # stop if <30% rejected
             break
-    log.info('Rejected {0} stars for PSF fitting ({1})'.format(
-                 bad_mask.sum(), pstselect_output_path))
+    log.info('Rejected {0} stars for PSF fitting'.format(bad_mask.sum()))
     # Now write the new file without the pruned objects to disk
     fh = open(new_path, 'w')
     fh.write("#N ID    XCENTER   YCENTER   MAG         MSKY\n"

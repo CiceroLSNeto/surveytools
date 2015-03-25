@@ -143,3 +143,24 @@ def equ2gal(ra, dec):
     #if GL > 180:
     #    GL -= 360
     return (GL, GT)
+
+
+def coalesce(masked_columns):
+    """Coalesces masked columns.
+
+    Parameters
+    ----------
+    masked_columns : iterable of type `MaskedColumn`
+
+    Returns
+    -------
+    masked_column : coalesced result
+    """
+    # todo: test if columns have right type
+    # todo: test if columns have same size
+    result = masked_columns[0].copy()
+    for col in masked_columns[1:]:
+        mask_coalesce = result.mask & ~col.mask
+        result.data[mask_coalesce] = col.data[mask_coalesce]
+        result.mask[mask_coalesce] = False
+    return result
