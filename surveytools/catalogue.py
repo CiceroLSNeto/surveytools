@@ -784,6 +784,7 @@ class VphasOffsetCatalogue(object):
                 framecats.append(self.create_ccd_catalogue(images=image_fn, ccd=ccd))
             catalogue = table.vstack(framecats, metadata_conflicts='silent')
             if self.save_diagnostics:
+                self.plot_diagnostics(catalogue)
                 self._plot_psf_overview(bands=image_fn.keys())
             # This is probably unnecessary
             import gc
@@ -863,7 +864,7 @@ class VphasOffsetCatalogue(object):
         # Setup the working directory to store temporary files
         ccd_workdir = os.path.join(self.workdir, 'ccd-{0}'.format(ccd))
         os.mkdir(ccd_workdir)
-        log.info('{0}: started catalogueing ccd {1}, '
+        log.info('Starting to build catalogue for {0} ccd {1}, '
                  'workdir: {2}'.format(self.name, ccd, ccd_workdir))
 
         jobs = []
@@ -939,7 +940,6 @@ class VphasOffsetCatalogue(object):
         if self.save_diagnostics:
             output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
             merged.write(output_filename, format='fits')
-            self.plot_diagnostics(merged)
         return merged
 
     def run_source_detection(self, frames):
@@ -994,18 +994,25 @@ class VphasOffsetCatalogue(object):
 
         # Second, demand a reliable detection in each band within 0.5 arcsec
         for band in frames.keys():
+            # Do not require a detection in u (very sparse)
+            if band == 'u':
+                continue
             # Sigma-clip on quality indicators.  In particular, outlying sky
             # values often mark spurious templates in the wings of bright stars.
-            for col in ['CHI', 'SHARPNESS', 'MSKY_PHOT', 'STDEV', 'SSKEW', 'NSREJ']:
-                mask_bad = sigma_clip(source_tables[band][col].data,
+            mask_bad = np.repeat(False, len(source_tables[band]))
+            for col in ['CHI', 'SHARPNESS', 'MSKY_PHOT', 'STDEV', 'SSKEW']:
+                mask_bad |= sigma_clip(source_tables[band][col].data,
                                       sig=3.0, iters=None).mask
+                #log.info('{0} {1}'.format(col, mask_bad.sum()))
             if band == 'i':
                 mask_bad_template[mask_bad] = True
             else:
+                # Demand that templates must be deemed good in this band!
                 crd_band = SkyCoord(source_tables[band]['ra'][~mask_bad]*u.deg,
                                     source_tables[band]['dec'][~mask_bad]*u.deg)
                 idx, sep2d, dist3d = crd_i.match_to_catalog_sky(crd_band)
                 mask_bad_template[sep2d > 0.5*u.arcsec] = True
+            log.info('PSF sigma-clipping in {0}: now {1} rejected.'.format(band, mask_bad_template.sum()))
         
         psf_table = source_tables['i'][~mask_bad_template]
         log.info('Found {0} candidate stars for PSF model fitting (rejected '
@@ -1019,7 +1026,10 @@ class VphasOffsetCatalogue(object):
         for idx, bnd in enumerate(VPHAS_BANDS):
             ax = fig.add_subplot(6, 1, idx+1)
             ax.plot([10, 25], [1, 1])
-            ax.scatter(tbl[bnd], tbl['chi_' + bnd])
+            try:
+                ax.scatter(tbl[bnd], tbl['chi_' + bnd])
+            except KeyError:
+                pass  # missing band
             ax.set_xlim([12, 19])
             ax.set_ylim([0, 4])
             ax.set_yticks([0, 1, 2, 3])
@@ -1039,10 +1049,11 @@ class VphasOffsetCatalogue(object):
         fig.subplots_adjust(top=0.94, bottom=0.07, hspace=0)
         for idx, bnd in enumerate(VPHAS_BANDS):
             ax = fig.add_subplot(6, 1, idx+1)
-            ax.scatter(tbl[bnd], tbl['sky_' + bnd])
+            try:
+                ax.scatter(tbl[bnd], tbl['sky_' + bnd])
+            except KeyError:
+                pass  # missing band
             ax.set_xlim([12, 18])
-            #ax.set_ylim([0, 3])
-            #ax.set_yticks([0.0, 1.0, 2.0])
             ax.text(0.02, 0.95, bnd, transform=ax.transAxes, fontsize=20, va='top')
             if idx == 5:
                 ax.set_xlabel('PSF magnitude')
