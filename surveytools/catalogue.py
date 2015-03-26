@@ -62,7 +62,7 @@ import photutils
 import photutils.morphology
 from photutils.background import Background
 
-from . import SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT, VPHAS_PIXEL_SCALE
+from . import SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT, VPHAS_PIXEL_SCALE, VPHAS_BANDS
 from .utils import cached_property, timed, coalesce
 from . import footprint
 
@@ -233,6 +233,11 @@ class VphasFrame(object):
         return self.hdu.header
 
     @cached_property
+    def primary_header(self):
+        """FITS header object."""
+        return fits.open(self.orig_filename)[0].header
+
+    @cached_property
     def object(self):
         """Astronomical target."""
         return self.header['OBJECT']
@@ -343,7 +348,7 @@ class VphasFrame(object):
 
     @property
     def psf_fwhm(self):
-        """The Full-Width-Half-Maximum of a 2D Gaussian PSF model fit."""
+        """The Full-Width-Half-Maximum of a Gaussian PSF model fit [pixels]."""
         try:
             return self._cache['psf_fwhm']
         except KeyError:
@@ -534,84 +539,95 @@ class VphasFrame(object):
         ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
                                  tbl['YCENTER_ALLSTAR'],
                                  origin=1)
-        ra_col = Column(name=self.band+'Ra', data=ra)
-        dec_col = Column(name=self.band+'Dec', data=dec)
+        ra_col = Column(name='ra_' + self.band, data=ra)
+        dec_col = Column(name='dec_' + self.band, data=dec)
         tbl.add_columns([ra_col, dec_col])
-        # Rename columns from the DAOPHOT defaults to something sensible
+        # Add further columns
+        # Shift of the source centroid during PSF fitting [arcsec]
+        tbl['pixelShift_' + self.band] = np.hypot(tbl['XCENTER_ALLSTAR'] - tbl['XINIT'],
+                                          tbl['YCENTER_ALLSTAR'] - tbl['YINIT'])
+        id_prefix = (
+                     os.path.basename(self.orig_filename)
+                        .replace('o', '')
+                        .replace('_', '-')
+                        .replace('.fit', '')
+                    )
+        tbl['detectionID_' + self.band] = ['{0}-{1}-{2}'.format(id_prefix, self.orig_extension, idx) for idx in tbl['ID']]
+        tbl['mjd_'+self.band] = np.repeat(self.primary_header['MJD-OBS'], len(tbl))
+        tbl['psffwhm_'+self.band] = np.repeat(self.psf_fwhm, len(tbl))
+        tbl['airmass_'+self.band] = np.repeat(self.airmass, len(tbl))
+        # Rename existing columns from DAOPHOT to our conventions
         tbl['MAG_ALLSTAR'].name = self.band
-        tbl['MERR_ALLSTAR'].name = self.band + 'Err'
-        tbl['CHI'].name = self.band + 'Chi'
-        tbl['PIER_ALLSTAR'].name = self.band + 'Pier'
-        tbl['PERROR_ALLSTAR'].name = self.band + 'Perror'
-        tbl['MAG_PHOT'].name = self.band + 'AperMag'
-        tbl['MERR_PHOT'].name = self.band + 'AperMagErr'
-        tbl['SNR'].name = self.band + 'SNR'
-        tbl['LIM3SIG'].name = self.band + 'MagLim'
-        tbl['ID'].name = self.band + 'ID'
-        tbl['XCENTER_ALLSTAR'].name = self.band + 'X'
-        tbl['YCENTER_ALLSTAR'].name = self.band + 'Y'
-        # Add extra columns and tune the value of others
-        with np.errstate(invalid='ignore'):
-            # Remove the untrustworthy magnitude estimates for undetected sources
-            mask_too_faint = (
-                                 (tbl[self.band+'SNR'] < 3)
-                                 | (tbl[self.band] > tbl[self.band+'MagLim'])
-                              )
-            tbl[self.band].mask[mask_too_faint] = True
-            tbl[self.band+'Err'].mask[mask_too_faint] = True
-            tbl[self.band+'AperMag'].mask[mask_too_faint] = True
-            tbl[self.band+'AperMagErr'].mask[mask_too_faint] = True
-            # Shift of the source centroid during PSF fitting [arcsec]
-            tbl[self.band+'Shift'] = np.hypot(tbl[self.band+'X'] - tbl['XINIT'],
-                                              tbl[self.band+'Y'] - tbl['YINIT'])
-            id_prefix = (
-                         os.path.basename(self.orig_filename)
-                            .replace('o', '')
-                            .replace('_', '-')
-                            .replace('.fit', '')
-                        )
-            tbl[self.band+'DetectionID'] = ['{0}-{1}-{2}'.format(id_prefix, self.orig_extension, idx) for idx in tbl[self.band+'ID']]
+        tbl['MERR_ALLSTAR'].name = 'err_' + self.band
+        tbl['MSKY_ALLSTAR'].name = 'sky_' + self.band
+        tbl['CHI'].name = 'chi_' + self.band
+        tbl['SHARPNESS'].name = 'sharpness_' + self.band
+        tbl['PIER_ALLSTAR'].name = 'pier_' + self.band
+        tbl['PERROR_ALLSTAR'].name = 'perror_' + self.band
+        tbl['MAG_PHOT'].name = 'aperMag_' + self.band
+        tbl['MERR_PHOT'].name = 'aperMagErr_' + self.band
+        tbl['SNR'].name = 'snr_' + self.band
+        tbl['LIM3SIG'].name = 'magLim_' + self.band
+        tbl['XCENTER_ALLSTAR'].name = 'x_' + self.band
+        tbl['YCENTER_ALLSTAR'].name = 'y_' + self.band
 
-            # Sources need to be fitted without error, the position should not
-            # have shifted, and the CHI score must be decent. If any of these
-            # conditions is not met, the PSF magnitude is put to NaN.
-            chi_max = float(self.cfg['photometry'].get('chi_max', 3.))
-            shift_max = float(self.cfg['photometry'].get('shift_max', 1.))
-            mask_bad_fit = (
-                            np.isnan(tbl[self.band].filled(np.nan))
-                            | (tbl[self.band + 'Pier'].filled(0) != 0)
-                            | (tbl[self.band + 'Chi'].filled(999) > chi_max)
-                            | (tbl[self.band + 'Shift'].filled(999) > shift_max)
-                        )
-            for suffix in ['', 'Err', 'Ra', 'Dec']:
-                tbl[self.band+suffix].mask[mask_bad_fit] = True 
-                
-            # The "10sig" quality flag helps the user select good sources
-            tbl[self.band+'10sig'] = (
-                                        ~tbl[self.band].mask
-                                        & (tbl[self.band + 'Err'].filled(999) < 0.1)
-                                        & (tbl[self.band + 'SNR'].filled(-999) > 10)
-                                        & (tbl[self.band + 'Chi'].filled(999) < 1.5)
-                                     )
+        # Write the full table as diagnostic output, before applying masks
+        if self.cfg['catalogue'].getboolean('save_diagnostics', True):
+            tbl_fn = os.path.join(self.workdir, 'photometry.fits')
+            log.debug('{0}: writing photometry to {1}'.format(self.band, tbl_fn))
+            tbl.write(tbl_fn)
+
+        # Mask untrustworthy magnitude estimates at low or negative SNR
+        mask_too_faint = (
+                             (tbl['snr_' + self.band].filled(-1) < 3)
+                             | (tbl[self.band].filled(999) > tbl['magLim_' + self.band])
+                          )
+        for prefix in ['', 'err_', 'aperMag_', 'aperMagErr_']:
+            tbl[prefix + self.band].mask[mask_too_faint] = True
+
+        # Mask PSF magnitudes if not fitted without error, the position should not
+        # have shifted, and the CHI score must be decent.
+        chi_max = float(self.cfg['photometry'].get('chi_max', 3.))
+        shift_max = float(self.cfg['photometry'].get('shift_max', 1.))
+        mask_bad_fit = (
+                        np.isnan(tbl[self.band].filled(np.nan))
+                        | (tbl['pier_' + self.band].filled(0) != 0)
+                        | (tbl['chi_' + self.band].filled(999) > chi_max)
+                        | (tbl['pixelShift_' + self.band].filled(999) > shift_max)
+                    )
+        for prefix in ['ra_', 'dec_', '', 'err_']:
+            tbl[prefix + self.band].mask[mask_bad_fit] = True 
+            
+        # The "clean" quality flag helps the user select good sources
+        tbl['clean_' + self.band] = (
+                                    ~tbl[self.band].mask
+                                    & (tbl['err_' + self.band].filled(999) < 0.1)
+                                    & (tbl['snr_' + self.band].filled(-999) > 10)
+                                    & (tbl['chi_' + self.band].filled(999) < 1.5)
+                                 )
 
         # Finally, specify the columns to keep and their order
-        columns = [self.band+'DetectionID',
-                   self.band+'ID',
-                   self.band+'X',
-                   self.band+'Y',
-                   self.band+'Ra',
-                   self.band+'Dec',
+        columns = ['detectionID_' + self.band,
+                   'x_' + self.band,
+                   'y_' + self.band,
+                   'ra_' + self.band,
+                   'dec_' + self.band,
                    self.band,
-                   self.band+'Err',
-                   self.band+'Chi',
-                   self.band+'Pier',
-                   self.band+'Perror',
-                   self.band+'AperMag',
-                   self.band+'AperMagErr',
-                   self.band+'SNR',
-                   self.band+'MagLim',
-                   self.band+'Shift',
-                   self.band+'10sig']
+                   'err_' + self.band,
+                   'chi_' + self.band,
+                   'sharpness_' + self.band,
+                   'sky_' + self.band,
+                   'pier_' + self.band,
+                   'perror_' + self.band,
+                   'aperMag_' + self.band,
+                   'aperMagErr_' + self.band,
+                   'snr_' + self.band,
+                   'magLim_' + self.band,
+                   'psffwhm_' + self.band,
+                   'airmass_' + self.band,
+                   'mjd_' + self.band,
+                   'pixelShift_' + self.band,
+                   'clean_' + self.band]
         return tbl[columns]
 
     @timed
@@ -738,8 +754,8 @@ class VphasOffsetCatalogue(object):
         if self.cfg['catalogue'].getboolean('include_ugr', True):
             try:
                 image_fn.update(offset.get_blue_filenames())
-            except NotObservedException as e:
-                log.warning(e.message)  # tolerate a missing blue concat
+            except footprint.NotObservedException as e:
+                log.warning(e)  # tolerate a missing blue concat
         log.debug('{0}: filenames found: {1}'.format(self.name, image_fn))
         return image_fn
 
@@ -759,8 +775,8 @@ class VphasOffsetCatalogue(object):
         with log.log_to_file(os.path.join(self.workdir, 'create_catalogue.log')):
             try:
                 image_fn = self._get_image_filenames(ccdlist=ccdlist)
-            except NotObservedException as e:  # No data for this field!
-                log.error(e.message)
+            except footprint.NotObservedException as e:  # No data for this field!
+                log.error(e)
                 return
             # Having obtained filenames, compute the catalogue for each ccd
             framecats = []
@@ -888,35 +904,42 @@ class VphasOffsetCatalogue(object):
 
         # Band-merge the tables
         merged = table.hstack(tables, metadata_conflicts='silent')
-        if 'u' in frames:
-            merged['ra'] = coalesce((merged['iRa'], merged['rRa'], merged['r2Ra'],
-                                     merged['gRa'], merged['haRa'], merged['uRa']))
-            merged['dec'] = coalesce((merged['iDec'], merged['rDec'], merged['r2Dec'],
-                                      merged['gDec'], merged['haDec'], merged['uDec']))
-        else:
-            merged['ra'] = coalesce((merged['iRa'], merged['rRa'], merged['haRa']))
-            merged['dec'] = coalesce((merged['iDec'], merged['rDec'], merged['haDec']))
+        # Merge the coordinates into a single reference position
+        astrometry_order = ['i', 'r', 'r2', 'g', 'ha', 'u']
+        if 'u' not in frames:
+            astrometry_order = ['i', 'r', 'ha']
+        merged['ra'] = coalesce([merged['ra_' + bnd] for bnd in astrometry_order])
+        merged['dec'] = coalesce([merged['dec_' + bnd] for bnd in astrometry_order])
+        # Add the xi and eta columns indicating the shift from the reference position
+        for band in frames:
+            if band == 'i':
+                continue  # always zero in i
+            merged['offsetRa_' + band] = 3600.0 * (merged['ra_' + band] - merged['ra']) * np.cos(np.radians(merged['dec']))
+            merged['offsetDec_' + band] = 3600.0 * (merged['dec_' + band] - merged['dec'])
+            merged.remove_columns(['ra_' + band, 'dec_' + band])
+
         # Add extra fields
         merged['field'] = self.name
         merged['ccd'] = ccd
-        merged['rmi'] = merged['r'] - merged['i']
-        merged['rmha'] = merged['r'] - merged['ha']
+        merged['r_i'] = merged['r'] - merged['i']
+        merged['r_ha'] = merged['r'] - merged['ha']
         if 'u' in frames:
-            merged['umg'] = merged['u'] - merged['g']
-            merged['gmr'] = merged['g'] - merged['r']
-            merged['a10'] = (merged['u10sig'].filled(False)
-                             & merged['g10sig'].filled(False)
-                             & merged['r10sig'].filled(False)
-                             & merged['i10sig'].filled(False)
-                             & merged['ha10sig'].filled(False))
+            merged['u_g'] = merged['u'] - merged['g']
+            merged['g_r'] = merged['g'] - merged['r']
+            merged['clean'] = (merged['clean_u'].filled(False)
+                             & merged['clean_g'].filled(False)
+                             & merged['clean_r'].filled(False)
+                             & merged['clean_i'].filled(False)
+                             & merged['clean_ha'].filled(False))
         else:
-            merged['a10'] = (merged['r10sig'].filled(False)
-                             & merged['i10sig'].filled(False)
-                             & merged['ha10sig'].filled(False))
+            merged['clean'] = (merged['clean_r'].filled(False)
+                             & merged['clean_i'].filled(False)
+                             & merged['clean_ha'].filled(False))
         # As well as returning the catalogue as a `Table`, write it to disk
         if self.save_diagnostics:
             output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
             merged.write(output_filename, format='fits')
+            self.plot_diagnostics(merged)
         return merged
 
     def run_source_detection(self, frames):
@@ -965,8 +988,9 @@ class VphasOffsetCatalogue(object):
         cutoff = np.percentile(nneighbor_dist, 70) * nneighbor_dist.unit
         if cutoff > 5*u.arcsec:
             cutoff = 5.*u.arcsec  # Don't be too strict in sparse fields
-        log.info('PSF neighbour limit = {0:.2f}.'.format(cutoff.to(u.arcsec)))
         mask_bad_template = nneighbor_dist < cutoff
+        log.info('PSF neighbour limit = {0:.2f} (rejects {1}).'
+                 .format(cutoff.to(u.arcsec), mask_bad_template.sum()))
 
         # Second, demand a reliable detection in each band within 0.5 arcsec
         for band in frames.keys():
@@ -988,6 +1012,47 @@ class VphasOffsetCatalogue(object):
                  '{1}).'.format(len(psf_table), mask_bad_template.sum()))
         return master_table, psf_table
 
+    def plot_diagnostics(self, tbl):
+        fig = pl.figure(figsize=(8.27, 11.7))
+        fig.suptitle('CHI vs magnitude', fontsize=24)
+        fig.subplots_adjust(top=0.94, bottom=0.07, hspace=0)
+        for idx, bnd in enumerate(VPHAS_BANDS):
+            ax = fig.add_subplot(6, 1, idx+1)
+            ax.plot([10, 25], [1, 1])
+            ax.scatter(tbl[bnd], tbl['chi_' + bnd])
+            ax.set_xlim([12, 19])
+            ax.set_ylim([0, 4])
+            ax.set_yticks([0, 1, 2, 3])
+            ax.text(0.02, 0.95, bnd, transform=ax.transAxes, fontsize=20, va='top')
+            if idx == 5:
+                ax.set_xlabel('PSF magnitude')
+            else:
+                ax.xaxis.set_ticklabels([])
+                if idx == 3:
+                    ax.set_ylabel('CHI')
+                    ax.yaxis.set_label_coords(-0.06, 1)
+        fig.savefig(os.path.join(self.workdir, 'diagnostic-chi-vs-mag.jpg'))
+        pl.close(fig)
+
+        fig = pl.figure(figsize=(8.27, 11.7))
+        fig.suptitle('Sky flux vs magnitude', fontsize=24)
+        fig.subplots_adjust(top=0.94, bottom=0.07, hspace=0)
+        for idx, bnd in enumerate(VPHAS_BANDS):
+            ax = fig.add_subplot(6, 1, idx+1)
+            ax.scatter(tbl[bnd], tbl['sky_' + bnd])
+            ax.set_xlim([12, 18])
+            #ax.set_ylim([0, 3])
+            #ax.set_yticks([0.0, 1.0, 2.0])
+            ax.text(0.02, 0.95, bnd, transform=ax.transAxes, fontsize=20, va='top')
+            if idx == 5:
+                ax.set_xlabel('PSF magnitude')
+            else:
+                ax.xaxis.set_ticklabels([])
+                if idx == 3:
+                    ax.set_ylabel('Sky flux [ADU]')
+                    ax.yaxis.set_label_coords(-0.06, 1)
+        fig.savefig(os.path.join(self.workdir, 'diagnostic-sky-vs-mag.jpg'))
+        pl.close(fig)
 
 ############
 # FUNCTIONS
@@ -1010,8 +1075,11 @@ def frame_initialisation_task(par):
     frame = VphasFrame(par['filename'], par['extension'], cfg=par['cfg'],
                        workdir=par['workdir'], **par['kwargs'])
     frame.populate_cache()
-    frame.plot_images(image_fn=os.path.join(par['workdir'], frame.name+'-data.png'),
-                      bg_fn=os.path.join(par['workdir'], frame.name+'-bg.png'))
+    if par['cfg']['catalogue'].getboolean('save_diagnostics', True):
+        frame.plot_images(image_fn=os.path.join(par['workdir'],
+                                                frame.name+'-data.png'),
+                          bg_fn=os.path.join(par['workdir'],
+                                             frame.name+'-bg.png'))
     return frame
 
 
@@ -1081,9 +1149,11 @@ def photometry_task(par):
                                   annulus_fwhm=float(conf.get('annulus_fwhm', 4.)),
                                   dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.))
                                   )
-    # Save the sky- and psf-subtracted images
-    fn = [os.path.join(par['workdir'], par['frame'].name+'-'+suffix+'.png')
-          for suffix in ['nostars', 'nosky', 'psf']]
-    par['frame'].plot_subtracted_images(nostars_fn=fn[0], nosky_fn=fn[1],
-                                        psf_fn=fn[2])
+    # Save the sky- and psf-subtracted images as diagnostics
+    if par['cfg']['catalogue'].getboolean('save_diagnostics', True):
+        fn = [os.path.join(par['workdir'], par['frame'].name+'-'+suffix+'.png')
+              for suffix in ['nostars', 'nosky', 'psf']]
+        par['frame'].plot_subtracted_images(nostars_fn=fn[0], nosky_fn=fn[1],
+                                            psf_fn=fn[2])
     return tbl
+

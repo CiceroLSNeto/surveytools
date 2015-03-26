@@ -606,9 +606,7 @@ def psf_success(path_psf_log, norm_scatter_limit=0.1):
         norm_scatter = re.findall("norm scatter[ :=]+([\d\.]+)", logtxt)
         norm_scatter.sort()
         norm_scatter_best = float(norm_scatter[0])
-        log.info('daophot.psf: norm scatter = '
-                 '{0} ({1})'.format(norm_scatter_best,
-                                    path_psf_log))
+        log.info('psf norm scatter = {0:.3f}'.format(norm_scatter_best))
         if (norm_scatter_limit is not None
         and norm_scatter_best > norm_scatter_limit):
             log.warning('daophot.psf: norm scatter exceeds limit '
