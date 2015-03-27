@@ -524,7 +524,7 @@ class VphasFrame(object):
         dp.apphot(coords=psf_tbl_filename)
         dp.pstselect()
         psf_scatter = dp.psf()
-        # Carry out the aperture and PSF photometry
+        # Carry out the aperture and PSF photometry on all the stars requested
         dp.apphot(coords=coords_tbl_filename)
         dp.allstar()
         # Remember the path of the PSF and the PSF-subtracted image FITS files
@@ -535,13 +535,16 @@ class VphasFrame(object):
         tbl = dp.get_allstar_phot_table()
         tbl.meta['band'] = self.band
         tbl.meta[self.band + 'PsfRms'] = psf_scatter
-        # Add celestial coordinates ra/dec as columns
+        # Add celestial coordinates ra/dec and nearest neighbour distance as columns
         ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
                                  tbl['YCENTER_ALLSTAR'],
                                  origin=1)
-        ra_col = Column(name='ra_' + self.band, data=ra)
-        dec_col = Column(name='dec_' + self.band, data=dec)
-        tbl.add_columns([ra_col, dec_col])
+        tbl['ra_' + self.band] = ra
+        tbl['dec_' + self.band] = dec
+        crd = SkyCoord(ra*u.deg, dec*u.deg)
+        idx, nn_dist, dist3d = crd.match_to_catalog_sky(crd, nthneighbor=2)
+        tbl['nndist_' + self.band] = nn_dist.to(u.arcsec)
+        #tbl.add_columns([ra_col, dec_col, nndist_col])
         # Add further columns
         # Shift of the source centroid during PSF fitting [arcsec]
         tbl['pixelShift_' + self.band] = np.hypot(tbl['XCENTER_ALLSTAR'] - tbl['XINIT'],
@@ -554,7 +557,7 @@ class VphasFrame(object):
                     )
         tbl['detectionID_' + self.band] = ['{0}-{1}-{2}'.format(id_prefix, self.orig_extension, idx) for idx in tbl['ID']]
         tbl['mjd_'+self.band] = np.repeat(self.primary_header['MJD-OBS'], len(tbl))
-        tbl['psffwhm_'+self.band] = np.repeat(self.psf_fwhm, len(tbl))
+        tbl['psffwhm_'+self.band] = np.repeat(VPHAS_PIXEL_SCALE * self.psf_fwhm, len(tbl))
         tbl['airmass_'+self.band] = np.repeat(self.airmass, len(tbl))
         # Rename existing columns from DAOPHOT to our conventions
         tbl['MAG_ALLSTAR'].name = self.band
@@ -626,6 +629,7 @@ class VphasFrame(object):
                    'psffwhm_' + self.band,
                    'airmass_' + self.band,
                    'mjd_' + self.band,
+                   'nndist_' + self.band,
                    'pixelShift_' + self.band,
                    'clean_' + self.band]
         return tbl[columns]
@@ -918,7 +922,9 @@ class VphasOffsetCatalogue(object):
             merged['offsetRa_' + band] = 3600.0 * (merged['ra_' + band] - merged['ra']) * np.cos(np.radians(merged['dec']))
             merged['offsetDec_' + band] = 3600.0 * (merged['dec_' + band] - merged['dec'])
             merged.remove_columns(['ra_' + band, 'dec_' + band])
-
+        # One nearest neighbour distance column is sufficient
+        merged['nndist'] = merged['nndist_i']
+        merged.remove_columns(['nndist_' + bnd for bnd in frames])
         # Add extra fields
         merged['field'] = self.name
         merged['ccd'] = ccd
