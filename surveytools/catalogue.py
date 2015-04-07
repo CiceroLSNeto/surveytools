@@ -67,7 +67,7 @@ from .utils import cached_property, timed, coalesce
 from . import footprint
 
 
-DEFAULT_CONFIG = os.path.join(SURVEYTOOLS_CONFIGDIR, 'vphas-offset-catalogue-default.ini')
+DEFAULT_CONFIG = os.path.join(SURVEYTOOLS_CONFIGDIR, 'catalogue.ini')
 
 ###########
 # CLASSES
@@ -191,10 +191,10 @@ class VphasFrame(object):
         newhdu.writeto(path)
         del newhdu  # Free memory
         # Also write the background frame as a diagnostic
-        self.background_path = os.path.join(self.workdir, '{0}-bg.fits'.format(fltr))
-        log.debug('Writing {0}'.format(os.path.basename(self.background_path)))
+        self.bg_path = os.path.join(self.workdir, '{0}-bg.fits'.format(fltr))
+        log.debug('Writing {0}'.format(os.path.basename(self.bg_path)))
         newhdu = fits.PrimaryHDU(bg.background, hdu.header)
-        newhdu.writeto(self.background_path)
+        newhdu.writeto(self.bg_path)
         del newhdu  # Free memory
         # Return the pre-processed image filename and extension
         return (path, 0)
@@ -214,8 +214,8 @@ class VphasFrame(object):
         return fits.open(self.orig_filename)[self.orig_extension]
 
     @property
-    def background_hdu(self):
-        return fits.open(self.background_path)[0]
+    def bg_hdu(self):
+        return fits.open(self.bg_path)[0]
 
     @cached_property
     def hdu(self):
@@ -654,9 +654,13 @@ class VphasFrame(object):
         imgstyle = {'cmap': pl.cm.gist_heat, 'origin': 'lower',
                     'vmin': 0, 'vmax': 1}
         log.debug('Writing {0}'.format(os.path.basename(image_fn)))
-        mimg.imsave(image_fn, transform(self.orig_hdu.data[::sampling, ::sampling]), **imgstyle)
+        mimg.imsave(image_fn,
+                    transform(self.orig_hdu.data[::sampling, ::sampling]),
+                    **imgstyle)
         log.debug('Writing {0}'.format(os.path.basename(bg_fn)))
-        mimg.imsave(bg_fn, transform(self.background_hdu.data[::sampling, ::sampling]), **imgstyle)
+        mimg.imsave(bg_fn,
+                    transform(self.bg_hdu.data[::sampling, ::sampling]),
+                    **imgstyle)
 
     @timed
     def plot_subtracted_images(self, nosky_fn, nostars_fn, psf_fn, sampling=1):
@@ -718,7 +722,8 @@ class VphasOffsetCatalogue(object):
         # Offset name must be a string of the form "0001a".
         if len(name) != 5 or not name.endswith(('a', 'b', 'c')):
             raise ValueError('"{0}" is an illegal offset name. '
-                             'Expected a string of the form "0001a".'.format(name))
+                             'Expected a string of the form "0001a".'
+                             .format(name))
         self.name = name
         self.kwargs = kwargs
         # Read the configuration
@@ -733,17 +738,18 @@ class VphasOffsetCatalogue(object):
         # Make a subdir in the workingdir for this offset
         self.workdir = tempfile.mkdtemp(prefix='{0}-'.format(name),
                                         dir=self.cfg['vphas']['workdir'])
-        # Allow "self.cpufarm.imap(f, param)" to be used for parallel processing
+        # Allow "self.cpufarm.imap(f, param)" to be used for parallel computing
         if self.cfg['catalogue'].getboolean('use_multiprocessing', True):
             self.cpufarm = multiprocessing.Pool()
         else:
             self.cpufarm = itertools  # Simple sequential processing
         # Save diagnostic plots and tables?
-        self.save_diagnostics = self.cfg['catalogue'].getboolean('save_diagnostics', True)
+        self.save_diagnostics = (self.cfg['catalogue']
+                                 .getboolean('save_diagnostics', True))
 
     def __del__(self):
         """Destructor."""
-        #shutil.rmtree(self.workdir)
+        # shutil.rmtree(self.workdir)
         # Make sure to get rid of any multiprocessing-forked processes;
         # they might be eating up a lot of memory!
         try:
@@ -776,16 +782,17 @@ class VphasOffsetCatalogue(object):
         -------
         catalogue : `astropy.table.Table` object
         """
-        with log.log_to_file(os.path.join(self.workdir, 'create_catalogue.log')):
+        with log.log_to_file(os.path.join(self.workdir, 'catalogue.log')):
             try:
                 image_fn = self._get_image_filenames(ccdlist=ccdlist)
-            except footprint.NotObservedException as e:  # No data for this field!
+            except footprint.NotObservedException as e:  # No data!
                 log.error(e)
                 return
             # Having obtained filenames, compute the catalogue for each ccd
             framecats = []
             for ccd in ccdlist:
-                framecats.append(self.create_ccd_catalogue(images=image_fn, ccd=ccd))
+                framecats.append(self.create_ccd_catalogue(images=image_fn,
+                                                           ccd=ccd))
             catalogue = table.vstack(framecats, metadata_conflicts='silent')
             if self.save_diagnostics:
                 self.plot_diagnostics(catalogue)
@@ -793,7 +800,8 @@ class VphasOffsetCatalogue(object):
             # This is probably unnecessary
             import gc
             log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
-            log.info('{0} finished, workdir was {1}'.format(self.name, self.workdir))
+            log.info('{0} finished, workdir was {1}'
+                     .format(self.name, self.workdir))
             # Returns the catalogue as an astropy table
             return catalogue
 
@@ -808,8 +816,8 @@ class VphasOffsetCatalogue(object):
         from matplotlib._png import read_png
         from matplotlib.offsetbox import AnnotationBbox, OffsetImage
         import matplotlib.patheffects as path_effects
-        
-        for band in bands:    
+
+        for band in bands:
             fig = pl.figure(figsize=(8, 4.5))
             ax = fig.add_subplot(1, 1, 1)
             for idx, ccd in enumerate(OMEGACAM_CCD_ARRANGEMENT):
@@ -826,7 +834,7 @@ class VphasOffsetCatalogue(object):
                                     xybox=(0., 0.),
                                     xycoords='data',
                                     boxcoords="offset points",
-                                    bboxprops={'lw': 0, 'facecolor': 'black'})                                  
+                                    bboxprops={'lw': 0, 'facecolor': 'black'})
                 ax.add_artist(ab)
                 ax.text(xy[0]-0.45, xy[1]-0.4, ccd, fontsize=8, color='white',
                         ha='left', va='top', zorder=999)
@@ -838,12 +846,13 @@ class VphasOffsetCatalogue(object):
             ax.set_yticks([])
             ax.axis('off')
             fig.text(0.025, 1.,
-                     'PSFs for {0}-{1} (log-stretched)'.format(self.name, band),
+                     'PSF for {0}-{1} (log-stretched)'.format(self.name, band),
                      fontsize=10, ha='left', va='top', color='white')
             fig.tight_layout()
 
             output_fn = os.path.join(self.workdir, 'psf-{0}.png'.format(band))
-            log.info('{0}: Writing {1}'.format(self.name, os.path.basename(output_fn)))
+            log.info('{0}: Writing {1}'
+                     .format(self.name, os.path.basename(output_fn)))
             fig.savefig(output_fn, dpi=120, facecolor='black')
             pl.close(fig)
 
@@ -857,8 +866,8 @@ class VphasOffsetCatalogue(object):
             Dictionary mapping band names onto FITS image filenames.
 
         ccd : int
-            Number of the OmegaCam CCD, corresponding to the extension number in
-            the 32-CCD multi-extension FITS images produced by the camera.
+            Number of the OmegaCam CCD, corresponding to the extension number
+            in the 32-CCD multi-extension FITS images produced by the camera.
 
         Returns
         -------
@@ -883,23 +892,24 @@ class VphasOffsetCatalogue(object):
         for frame in self.cpufarm.imap(frame_initialisation_task, jobs):
             frames[frame.band] = frame
         # Create a merged source table
-        source_table, psf_table = self.run_source_detection(frames)
+        sourcetbl, psf_table = self.run_source_detection(frames)
         if self.save_diagnostics:
             with warnings.catch_warnings():
                 # Attribute `keywords` cannot be written to FITS files
-                warnings.filterwarnings("ignore", message='Attribute `keywords`(.*)')
-                source_table.write(os.path.join(ccd_workdir, 'sourcelist.fits'))
+                warnings.filterwarnings("ignore",
+                                        message='Attribute `keywords`(.*)')
+                sourcetbl.write(os.path.join(ccd_workdir, 'sourcelist.fits'))
                 psf_table.write(os.path.join(ccd_workdir, 'psflist.fits'))
         # Carry out the PSF photometry using the source table created above
         if 'u' in frames:
-            bandorder = ['u', 'g', 'r', 'i', 'ha', 'r2']  # sort columns by lambda
-        else: # sometimes the blue concat is missing
+            bandorder = ['u', 'g', 'r', 'i', 'ha', 'r2']  # sorted by lambda
+        else:  # sometimes the blue concat is missing
             bandorder = ['r', 'i', 'ha']
         jobs = []
         for band in bandorder:
             params = {'frame': frames[band],
-                      'ra': source_table['ra'],
-                      'dec': source_table['dec'],
+                      'ra': sourcetbl['ra'],
+                      'dec': sourcetbl['dec'],
                       'ra_psf': psf_table['ra'],
                       'dec_psf': psf_table['dec'],
                       'cfg': self.cfg,
@@ -913,14 +923,19 @@ class VphasOffsetCatalogue(object):
         astrometry_order = ['i', 'r', 'r2', 'g', 'ha', 'u']
         if 'u' not in frames:
             astrometry_order = ['i', 'r', 'ha']
-        merged['ra'] = coalesce([merged['ra_' + bnd] for bnd in astrometry_order])
-        merged['dec'] = coalesce([merged['dec_' + bnd] for bnd in astrometry_order])
-        # Add the xi and eta columns indicating the shift from the reference position
+        merged['ra'] = coalesce([merged['ra_' + bnd]
+                                 for bnd in astrometry_order])
+        merged['dec'] = coalesce([merged['dec_' + bnd]
+                                  for bnd in astrometry_order])
+        # Add columns containing the ra/dec offsets from the reference position
         for band in frames:
             if band == 'i':
                 continue  # always zero in i
-            merged['offsetRa_' + band] = 3600.0 * (merged['ra_' + band] - merged['ra']) * np.cos(np.radians(merged['dec']))
-            merged['offsetDec_' + band] = 3600.0 * (merged['dec_' + band] - merged['dec'])
+            merged['offsetRa_' + band] = (3600. *
+                                          (merged['ra_'+band] - merged['ra']) *
+                                          np.cos(np.radians(merged['dec'])))
+            merged['offsetDec_' + band] = (3600. * (merged['dec_'+band] -
+                                           merged['dec']))
             merged.remove_columns(['ra_' + band, 'dec_' + band])
         # One nearest neighbour distance column is sufficient
         merged['nndist'] = merged['nndist_i']
@@ -933,15 +948,15 @@ class VphasOffsetCatalogue(object):
         if 'u' in frames:
             merged['u_g'] = merged['u'] - merged['g']
             merged['g_r'] = merged['g'] - merged['r']
-            merged['clean'] = (merged['clean_u'].filled(False)
-                             & merged['clean_g'].filled(False)
-                             & merged['clean_r'].filled(False)
-                             & merged['clean_i'].filled(False)
-                             & merged['clean_ha'].filled(False))
+            merged['clean'] = (merged['clean_u'].filled(False) &
+                               merged['clean_g'].filled(False) &
+                               merged['clean_r'].filled(False) &
+                               merged['clean_i'].filled(False) &
+                               merged['clean_ha'].filled(False))
         else:
-            merged['clean'] = (merged['clean_r'].filled(False)
-                             & merged['clean_i'].filled(False)
-                             & merged['clean_ha'].filled(False))
+            merged['clean'] = (merged['clean_r'].filled(False) &
+                               merged['clean_i'].filled(False) &
+                               merged['clean_ha'].filled(False))
         # As well as returning the catalogue as a `Table`, write it to disk
         if self.save_diagnostics:
             output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
@@ -966,31 +981,35 @@ class VphasOffsetCatalogue(object):
             params = {'frame': frame,
                       'cfg': self.cfg}
             jobs.append(params)
-        source_tables = {}
+        sources = {}
         for tbl in self.cpufarm.imap(source_detection_task, jobs):
-            source_tables[tbl.meta['band']] = tbl
+            sources[tbl.meta['band']] = tbl
         # Now merge the single-band lists into a master source table
-        master_table = source_tables['i']
+        master_tbl = sources['i']
         for band in frames.keys():
             if band == 'i':
                 continue  # i is the master
-            current_coordinates = SkyCoord(master_table['ra']*u.deg, master_table['dec']*u.deg)
-            new_coordinates = SkyCoord(source_tables[band]['ra']*u.deg, source_tables[band]['dec']*u.deg)
-            idx, sep2d, dist3d = new_coordinates.match_to_catalog_sky(current_coordinates)
+            current_crd = SkyCoord(master_tbl['ra']*u.deg,
+                                   master_tbl['dec']*u.deg)
+            new_crd = SkyCoord(sources[band]['ra']*u.deg,
+                               sources[band]['dec']*u.deg)
+            idx, sep2d, dist3d = new_crd.match_to_catalog_sky(current_crd)
             mask_extra = sep2d > 2*u.arcsec
-            log.info('Found {0} extra sources in {1}.'.format(mask_extra.sum(), band))
-            master_table = table.vstack([master_table, source_tables[band][mask_extra]],
-                                        metadata_conflicts='silent')
-        log.info('Found {0} candidate sources for the catalogue.'.format(len(master_table)))
+            log.info('Found {0} extra sources in {1}.'
+                     .format(mask_extra.sum(), band))
+            master_tbl = table.vstack([master_tbl, sources[band][mask_extra]],
+                                      metadata_conflicts='silent')
+        log.info('Found {0} candidate sources for the catalogue.'
+                 .format(len(master_tbl)))
 
-        # Determine sources suitable to act as templates for PSF fitting.
-        # We will use the i-band coordinates of sources that have been detected,
-        # and are deemed to be reliable, clean, isolated sources, in all bands.
-        crd_i = SkyCoord(source_tables['i']['ra']*u.deg, source_tables['i']['dec']*u.deg)
+        # Determine sources suitable to act as templates for PSF fitting;
+        # we use the clean/isolated sources detected in the i-band.
+        crd_i = SkyCoord(sources['i']['ra']*u.deg, sources['i']['dec']*u.deg)
 
         # First, make sure the PSF template stars have no nearby neighbour;
         # the cutoff distance is adaptive (70% percentile).
-        idx, nneighbor_dist, dist3d = crd_i.match_to_catalog_sky(crd_i, nthneighbor=2)
+        idx, nneighbor_dist, dist3d = crd_i.match_to_catalog_sky(crd_i,
+                                                                 nthneighbor=2)
         cutoff = np.percentile(nneighbor_dist, 70) * nneighbor_dist.unit
         if cutoff > 5*u.arcsec:
             cutoff = 5.*u.arcsec  # Don't be too strict in sparse fields
@@ -1003,27 +1022,27 @@ class VphasOffsetCatalogue(object):
             # Do not require a detection in u (very sparse)
             if band == 'u':
                 continue
-            # Sigma-clip on quality indicators.  In particular, outlying sky
-            # values often mark spurious templates in the wings of bright stars.
-            mask_bad = np.repeat(False, len(source_tables[band]))
+            # Sigma-clip on quality indicators. In particular, outlying sky
+            # values often flag spurious objects in the wings of bright stars.
+            mask_bad = np.repeat(False, len(sources[band]))
             for col in ['CHI', 'SHARPNESS', 'MSKY_PHOT', 'STDEV', 'SSKEW']:
-                mask_bad |= sigma_clip(source_tables[band][col].data,
-                                      sig=3.0, iters=None).mask
-                #log.info('{0} {1}'.format(col, mask_bad.sum()))
+                mask_bad |= sigma_clip(sources[band][col].data,
+                                       sig=3.0, iters=None).mask
             if band == 'i':
                 mask_bad_template[mask_bad] = True
             else:
                 # Demand that templates must be deemed good in this band!
-                crd_band = SkyCoord(source_tables[band]['ra'][~mask_bad]*u.deg,
-                                    source_tables[band]['dec'][~mask_bad]*u.deg)
+                crd_band = SkyCoord(sources[band]['ra'][~mask_bad]*u.deg,
+                                    sources[band]['dec'][~mask_bad]*u.deg)
                 idx, sep2d, dist3d = crd_i.match_to_catalog_sky(crd_band)
                 mask_bad_template[sep2d > 0.5*u.arcsec] = True
-            log.info('PSF sigma-clipping in {0}: now {1} rejected.'.format(band, mask_bad_template.sum()))
-        
-        psf_table = source_tables['i'][~mask_bad_template]
+            log.info('PSF sigma-clipping in {0}: now {1} rejected.'
+                     .format(band, mask_bad_template.sum()))
+
+        psf_table = sources['i'][~mask_bad_template]
         log.info('Found {0} candidate stars for PSF model fitting (rejected '
                  '{1}).'.format(len(psf_table), mask_bad_template.sum()))
-        return master_table, psf_table
+        return master_tbl, psf_table
 
     def plot_diagnostics(self, tbl):
         fig = pl.figure(figsize=(8.27, 11.7))
@@ -1039,7 +1058,8 @@ class VphasOffsetCatalogue(object):
             ax.set_xlim([12, 19])
             ax.set_ylim([0, 4])
             ax.set_yticks([0, 1, 2, 3])
-            ax.text(0.02, 0.95, bnd, transform=ax.transAxes, fontsize=20, va='top')
+            ax.text(0.02, 0.95, bnd, transform=ax.transAxes,
+                    fontsize=20, va='top')
             if idx == 5:
                 ax.set_xlabel('PSF magnitude')
             else:
@@ -1060,7 +1080,8 @@ class VphasOffsetCatalogue(object):
             except KeyError:
                 pass  # missing band
             ax.set_xlim([12, 18])
-            ax.text(0.02, 0.95, bnd, transform=ax.transAxes, fontsize=20, va='top')
+            ax.text(0.02, 0.95, bnd, transform=ax.transAxes,
+                    fontsize=20, va='top')
             if idx == 5:
                 ax.set_xlabel('PSF magnitude')
             else:
@@ -1070,6 +1091,7 @@ class VphasOffsetCatalogue(object):
                     ax.yaxis.set_label_coords(-0.06, 1)
         fig.savefig(os.path.join(self.workdir, 'diagnostic-sky-vs-mag.jpg'))
         pl.close(fig)
+
 
 ############
 # FUNCTIONS
@@ -1127,7 +1149,7 @@ def source_detection_task(par):
                            maxiter=int(conf.get('maxiter', 20)),
                            maxnpsf=int(conf.get('maxnpsf', 20)),
                            varorder=int(conf.get('varorder', 0)),
-                           mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)),                         
+                           mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)),
                            annulus_fwhm=float(conf.get('annulus_fwhm', 4.)),
                            dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.))
                            )
@@ -1153,19 +1175,20 @@ def photometry_task(par):
         Photometry.
     """
     conf = par['cfg']['photometry']
-    tbl = par['frame'].photometry(par['ra'],
-                                  par['dec'],
-                                  ra_psf=par['ra_psf'],
-                                  dec_psf=par['dec_psf'],
-                                  psfrad_fwhm=float(conf.get('psfrad_fwhm', 8.)),
-                                  fitrad_fwhm=float(conf.get('fitrad_fwhm', 1.)),
-                                  maxiter=int(conf.get('maxiter', 10)),
-                                  maxnpsf=int(conf.get('maxnpsf', 60)),
-                                  varorder=int(conf.get('varorder', 0)),
-                                  mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)),
-                                  annulus_fwhm=float(conf.get('annulus_fwhm', 4.)),
-                                  dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.))
-                                  )
+    tbl = par['frame'].photometry(
+              par['ra'],
+              par['dec'],
+              ra_psf=par['ra_psf'],
+              dec_psf=par['dec_psf'],
+              psfrad_fwhm=float(conf.get('psfrad_fwhm', 8.)),
+              fitrad_fwhm=float(conf.get('fitrad_fwhm', 1.)),
+              maxiter=int(conf.get('maxiter', 10)),
+              maxnpsf=int(conf.get('maxnpsf', 60)),
+              varorder=int(conf.get('varorder', 0)),
+              mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)),
+              annulus_fwhm=float(conf.get('annulus_fwhm', 4.)),
+              dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.))
+              )
     # Save the sky- and psf-subtracted images as diagnostics
     if par['cfg']['catalogue'].getboolean('save_diagnostics', True):
         fn = [os.path.join(par['workdir'], par['frame'].name+'-'+suffix+'.png')
@@ -1173,4 +1196,3 @@ def photometry_task(par):
         par['frame'].plot_subtracted_images(nostars_fn=fn[0], nosky_fn=fn[1],
                                             psf_fn=fn[2])
     return tbl
-

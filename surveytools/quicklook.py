@@ -8,7 +8,7 @@ import imageio
 
 import matplotlib
 import matplotlib.pyplot as pl
-from matplotlib.colors import LogNorm
+from matplotlib.colors import Normalize, LogNorm
 import matplotlib.patheffects as path_effects
 import matplotlib.image as mimg
 
@@ -214,9 +214,9 @@ def vphas_quicklook_main(args=None):
 
 
 def vst_pawplot(filename, out_fn=None, dpi=100,
-                min_cut=None, max_cut=None,
+                scale='log', min_cut=None, max_cut=None,
                 min_percent=1.0, max_percent=99.5,
-                cmap='gist_heat', show_hdu=False):
+                cmap='gist_heat', show_hdu=False, normalize=False):
     """Plots the 32-CCD OmegaCam mosaic as a pretty bitmap.
 
     Parameters
@@ -232,6 +232,10 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
     dpi : float, optional [dots per inch]
         Resolution of the output 10-by-9 inch output bitmap.
         The default is 100.
+
+    scale : {{'linear', 'log'}}
+        The scaling/stretch function to apply to the image.  The default
+        is 'log'.
 
     min_cut : float, optional
         The pixel value of the minimum cut level.  Data values less than
@@ -259,6 +263,9 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
 
     show_hdu : boolean, optional
         Plot the HDU extension number if True (default: False).
+
+    normalize : boolean, optional
+        Divide each HDU by its median value before plotting (default: False).
     """
     # Check input
     if out_fn is None:
@@ -278,6 +285,11 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
         vmin, vmax = np.percentile(sample, [min_percent, max_percent])
         del sample  # save memory
     log.debug('vst_pawplot: vmin={0}, vmax={1}'.format(vmin, vmax))
+    # Determine the stretch
+    if scale == 'linear':
+        normobj = Normalize(vmin=vmin, vmax=vmax)
+    else:
+        normobj = LogNorm(vmin=vmin, vmax=vmax)
     # Setup the figure and plot the extensions
     pl.interactive(False)
     fig = pl.figure(figsize=(10, 9))
@@ -287,9 +299,10 @@ def vst_pawplot(filename, out_fn=None, dpi=100,
         log.debug('vst_pawplot: adding HDU #{0}'.format(hduno))
         ax = fig.add_subplot(4, 8, idx)
         sampling = int(500 / dpi)
-        im = ax.matshow(f[hduno].data[::sampling, ::-sampling],
-                        norm=LogNorm(vmin=vmin, vmax=vmax),
-                        cmap=cmap, origin='lower')
+        data_to_show = f[hduno].data[::sampling, ::-sampling]
+        if normalize:
+            data_to_show = data_to_show / np.median(data_to_show)
+        im = ax.matshow(data_to_show, norm=normobj, cmap=cmap, origin='lower')
         ax.set_xticks([])
         ax.set_yticks([])
         ax.axis('off')
@@ -347,6 +360,8 @@ def vst_pawplot_main(args=None):
                         'PNG file with the same name as the FITS file)')
     parser.add_argument('--dpi', type=float, default=100.,
                         help=('The resolution of the output image.'))
+    parser.add_argument('--scale', type=str, default='log',
+                        help='Type of image scaling ("log", "linear")')
     parser.add_argument('--min_cut', type=float, default=None,
                         help='The pixel value of the minimum cut level')
     parser.add_argument('--max_cut', type=float, default=None,
@@ -361,6 +376,8 @@ def vst_pawplot_main(args=None):
                         default='gist_heat', help='matplotlib color map name')
     parser.add_argument('--show-hdu', action='store_true',
                         help='Display the HDU extension numbers.')
+    parser.add_argument('--normalize', action='store_true',
+                        help='Divide each HDU by its median value.')
     parser.add_argument('filename', nargs='+',
                         help='Path to one or more FITS files to convert')
     args = parser.parse_args(args)
@@ -369,12 +386,14 @@ def vst_pawplot_main(args=None):
         vst_pawplot(filename,
                     out_fn=args.o,
                     dpi=args.dpi,
+                    scale=args.scale,
                     min_cut=args.min_cut,
                     max_cut=args.max_cut,
                     min_percent=args.min_percent,
                     max_percent=args.max_percent,
                     cmap=args.cmap,
-                    show_hdu=args.show_hdu)
+                    show_hdu=args.show_hdu,
+                    normalize=args.normalize)
 
 
 if __name__ == '__main__':

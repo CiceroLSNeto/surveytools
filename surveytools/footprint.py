@@ -6,6 +6,18 @@ fp = VphasFootprint()
 fp.get_field_dict()  # returns {'0001a': SkyCoord(), ...}
 fp.get_field_corners(fieldname)
 fp.get_plot()
+
+Warning
+-------
+In the first ~month of the survey, the third H-alpha offset was
+observed at the wrong position (at RA -888" / Dec +1010").
+The pointings affected are:
+['0004b', '0005b', '0030b', '0032b', '0034b',
+ '0298b', '0299b', '0392b', '0393b', '0394b',
+ '0441b', '0442b', '0443b', '1043b', '1044b',
+ '1045b', '1046b', '1321b', '1322b', '1326b',
+ '1327b', '1328b', '1413b', '1414b', '1786b',
+ '1787b', '1788b', '1789b', '1790b', '1791b']:
 """
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
@@ -100,6 +112,8 @@ class VphasExposure():
             corners = [[0, 0], [xmax, 0], [xmax, ymax], [0, ymax]]
             wcs = WCS(self.hdulist[ccd].header)
             mycorners = wcs.wcs_pix2world(corners, 1)
+            import pdb
+            pdb.set_trace()
             for value in mycorners.reshape(8):
                 row.append(value)
             tbl.add_row(row)
@@ -144,6 +158,8 @@ class VphasOffset():
         Returns
         -------
         filenames : dict
+            Dictionary of the form
+            {'ha':'filename', 'r': 'filename', 'i': 'filename'}
         """
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message='(.*)did not parse '
@@ -154,6 +170,7 @@ class VphasOffset():
         # Has the field been observed?
         if (metadata['Field_1'] == fieldname).sum() == 0:
             raise NotObservedException('{0} has not been observed in the red filters'.format(self.name))
+
         offset2idx = {'a': 0, 'b': -1, 'c': 1}
         idx = offset2idx[self.name[-1:]]
         # Define the colloquial band names used in the catalogue
@@ -167,6 +184,7 @@ class VphasOffset():
                 assert len(filenames) == 3  # sanity check
             else:
                 assert len(filenames) == 2  # sanity check
+            # TODO: it is not generally true that the sequence is chronological, i.e. the sort below does not work in a few cases!
             filenames.sort()
             result[bandname] = filenames[idx]
         return result
