@@ -404,6 +404,20 @@ class VphasPlannedFootprint():
 # FUNCTIONS
 ############
 
+def vphas_filenames_main(args=None):
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(
+        description='Lists the details of a VPHAS+ survey field.')
+    parser.add_argument('field', nargs=1, help='Field identifier')
+    args = parser.parse_args(args)
+    for field in args.field:
+        try:
+            vo = VphasOffset(field)
+            print(json.dumps(vo.get_filenames(), indent=2))
+        except Exception as e:
+            log.error(e)
+
 def glon_formatter(l, tickno):
     if l < 0:
         l += 360
