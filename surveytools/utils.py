@@ -6,6 +6,7 @@ import time
 import functools
 import numpy as np
 
+from astropy import table
 from astropy import log
 
 
@@ -145,21 +146,41 @@ def equ2gal(ra, dec):
     return (GL, GT)
 
 
-def coalesce(masked_columns):
+class ColumnMergeError(ValueError):
+    pass
+
+def _get_list_of_columns(columns):
+    """
+    Check that columns is a Column or sequence of Columns.  Returns the
+    corresponding list of Columns.
+    """
+    import collections
+    # Make sure we have a list of things
+    if not isinstance(columns, collections.Sequence):
+        columns = [columns]
+    # Make sure each thing is a Column
+    if any(not isinstance(x, table.Column) for x in columns) or len(columns) == 0:
+        raise TypeError('`columns` arg must be a Column or sequence of Columns')
+    return columns
+
+
+def coalesce(columns):
     """Coalesces masked columns.
 
     Parameters
     ----------
-    masked_columns : iterable of type `MaskedColumn`
+    columns : iterable of type `MaskedColumn`
 
     Returns
     -------
-    masked_column : coalesced result
+    column : coalesced result
     """
     # todo: test if columns have right type
     # todo: test if columns have same size
-    result = masked_columns[0].copy()
-    for col in masked_columns[1:]:
+    columns = _get_list_of_columns(columns)  # validates input
+    
+    result = columns[0].copy()
+    for col in columns[1:]:
         mask_coalesce = result.mask & ~col.mask
         result.data[mask_coalesce] = col.data[mask_coalesce]
         result.mask[mask_coalesce] = False
