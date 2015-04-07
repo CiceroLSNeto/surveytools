@@ -12,3 +12,4 @@ Requiring an object to be detected at the ~same position in
 all bands greatly helps reduce this problem.  Imposing a stricter criterion
 on roundness may help too.  Even better: pruning stars from pstselect was
 found to be the killer trick.
+* Atmospheric refraction is not a concern because the astrometric standards in the field would suffer the ~same effect.
