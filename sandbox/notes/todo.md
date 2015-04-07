@@ -6,6 +6,7 @@ What's wrong with o20120819_00066.fit ?
 
 Catalogue
 ---------
+* What sigma to use for i-band detection step? 2 seems better for sparse; 1 for dense? (review sigma estimate?)
 * What about aperture correction?
 * Remove objects with large shifts altogether?
 * Ensure the merged output catalogue has the right column order of bands.
