@@ -753,9 +753,6 @@ class VphasOffsetCatalogue(object):
             self.cpumap = self.pool.imap
         else:
             self.cpumap = map #itertools  # Simple sequential processing
-        # Save diagnostic plots and tables?
-        self.save_diagnostics = (self.cfg['catalogue']
-                                 .getboolean('save_diagnostics', True))
 
     def __del__(self):
         """Destructor."""
@@ -766,6 +763,11 @@ class VphasOffsetCatalogue(object):
             self.pool.terminate()
         except AttributeError:
             pass  # only applies to a multiprocessing.pool.Pool object
+
+    @property
+    def save_diagnostics(self):
+        # Save diagnostic plots and tables?
+        return self.cfg['catalogue'].getboolean('save_diagnostics', True)
 
     def _get_image_filenames(self, ccdlist=range(1, 33)):
         """Returns a dictionary mapping band names onto the image filenames."""
