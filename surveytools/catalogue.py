@@ -576,9 +576,13 @@ class VphasFrame(object):
 
         # Write the full table as diagnostic output, before applying masks
         if self.cfg['catalogue'].getboolean('save_diagnostics', True):
-            tbl_fn = os.path.join(self.workdir, 'photometry.fits')
-            log.debug('{0}: writing photometry to {1}'.format(self.band, tbl_fn))
-            tbl.write(tbl_fn)
+            with warnings.catch_warnings():
+                # Attribute `keywords` cannot be written to FITS files
+                warnings.filterwarnings("ignore",
+                                        message='Attribute `keywords`(.*)')
+                tbl_fn = os.path.join(self.workdir, 'photometry.fits')
+                log.debug('{0}: writing photometry to {1}'.format(self.band, tbl_fn))
+                tbl.write(tbl_fn)
 
         # Mask untrustworthy magnitude estimates at low or negative SNR
         mask_too_faint = (
@@ -717,6 +721,11 @@ class VphasOffsetCatalogue(object):
         5-character wide identifier, composed of the 4-character wide VPHAS
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
+
+    config : str
+        Filename of the ".ini" file that contains the configuration parameters.
+        By default, the catalogue.ini file that comes with the package will be
+        used.
     """
     def __init__(self, name, config=DEFAULT_CONFIG, **kwargs):
         # Offset name must be a string of the form "0001a".
@@ -959,8 +968,12 @@ class VphasOffsetCatalogue(object):
                                merged['clean_ha'].filled(False))
         # As well as returning the catalogue as a `Table`, write it to disk
         if self.save_diagnostics:
-            output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
-            merged.write(output_filename, format='fits')
+            with warnings.catch_warnings():
+                # Attribute `keywords` cannot be written to FITS files
+                warnings.filterwarnings("ignore",
+                                        message='Attribute `keywords`(.*)')
+                output_filename = os.path.join(ccd_workdir, 'catalogue.fits')
+                merged.write(output_filename, format='fits')
         return merged
 
     def run_source_detection(self, frames):
