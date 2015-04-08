@@ -3,7 +3,8 @@ from __future__ import absolute_import
 import os
 
 # Use Agg if no DISPLAY is available
-if os.environ.get('DISPLAY') is None:
+DISPLAY = os.environ.get('DISPLAY')
+if DISPLAY is None or DISPLAY.startswith('localhost'):
     import matplotlib
     matplotlib.use('Agg')
 
