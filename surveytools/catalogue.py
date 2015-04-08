@@ -747,11 +747,12 @@ class VphasOffsetCatalogue(object):
         # Make a subdir in the workingdir for this offset
         self.workdir = tempfile.mkdtemp(prefix='{0}-'.format(name),
                                         dir=self.cfg['vphas']['workdir'])
-        # Allow "self.cpufarm.imap(f, param)" to be used for parallel computing
+        # Allow parallel computing
         if self.cfg['catalogue'].getboolean('use_multiprocessing', True):
-            self.cpufarm = multiprocessing.Pool()
+            self.pool = multiprocessing.Pool()
+            self.cpumap = self.pool.imap
         else:
-            self.cpufarm = itertools  # Simple sequential processing
+            self.cpumap = map #itertools  # Simple sequential processing
         # Save diagnostic plots and tables?
         self.save_diagnostics = (self.cfg['catalogue']
                                  .getboolean('save_diagnostics', True))
@@ -762,7 +763,7 @@ class VphasOffsetCatalogue(object):
         # Make sure to get rid of any multiprocessing-forked processes;
         # they might be eating up a lot of memory!
         try:
-            self.cpufarm.terminate()
+            self.pool.terminate()
         except AttributeError:
             pass  # only applies to a multiprocessing.pool.Pool object
 
@@ -898,7 +899,7 @@ class VphasOffsetCatalogue(object):
                       'kwargs': self.kwargs}
             jobs.append(params)
         frames = {}
-        for frame in self.cpufarm.imap(frame_initialisation_task, jobs):
+        for frame in self.cpumap(frame_initialisation_task, jobs):
             frames[frame.band] = frame
         # Create a merged source table
         sourcetbl, psf_table = self.run_source_detection(frames)
@@ -924,7 +925,7 @@ class VphasOffsetCatalogue(object):
                       'cfg': self.cfg,
                       'workdir': ccd_workdir}
             jobs.append(params)
-        tables = [tbl for tbl in self.cpufarm.imap(photometry_task, jobs)]
+        tables = [tbl for tbl in self.cpumap(photometry_task, jobs)]
 
         # Band-merge the tables
         merged = table.hstack(tables, metadata_conflicts='silent')
@@ -995,7 +996,7 @@ class VphasOffsetCatalogue(object):
                       'cfg': self.cfg}
             jobs.append(params)
         sources = {}
-        for tbl in self.cpufarm.imap(source_detection_task, jobs):
+        for tbl in self.cpumap(source_detection_task, jobs):
             sources[tbl.meta['band']] = tbl
         # Now merge the single-band lists into a master source table
         master_tbl = sources['i']
