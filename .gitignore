@@ -60,3 +60,5 @@ target/
 
 # Sandbox
 sandbox/*
+pyraf/
+.ipynb_checkpoints
