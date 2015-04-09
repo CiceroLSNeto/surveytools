@@ -1206,7 +1206,7 @@ def photometry_task(par):
               dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.)),
               fitsky=conf.get('fitsky', 'no'),
               sannulus_fwhm=float(conf.get('sannulus_fwhm', 1.)),
-              wsannulus_fwhm=float(conf.get('wsannulus_fwhm', 2.))
+              wsannulus_fwhm=float(conf.get('wsannulus_fwhm', 3.))
               )
     # Save the sky- and psf-subtracted images as diagnostics
     if par['cfg']['catalogue'].getboolean('save_diagnostics', True):
