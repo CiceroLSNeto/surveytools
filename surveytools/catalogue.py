@@ -428,15 +428,13 @@ class VphasFrame(object):
         """Returns a Daophot object, pre-configured to work on the image."""
         image_path = '{0}[{1}]'.format(self.filename, self.extension)
         from .daophot import Daophot
-        # Allow fwhmpsf to be overriden such that all frames can require
+        # Allow fwhmpsf to be imposed such that all frames can require
         # the same aperture correction
-        if 'fwhmpsf' in kwargs:
-            session_fwhmpsf = kwargs['fwhmpsf']
-        else:
-            session_fwhmpsf = self.psf_fwhm
+        if 'fwhmpsf' not in kwargs:
+            kwargs['fwhmpsf'] = self.psf_fwhm
         dp = Daophot(image_path, workdir=self.workdir,
                      datamin=self.datamin, datamax=self.datamax,
-                     epadu=self.gain, fwhmpsf=session_fwhmpsf,
+                     epadu=self.gain,
                      itime=self.exposure_time,
                      ratio=self.psf_ratio, readnoi=self.readnoise,
                      sigma=self.sky_sigma, theta=self.psf_theta,
@@ -755,7 +753,9 @@ class VphasOffsetCatalogue(object):
                                         dir=self.cfg['vphas']['workdir'])
         # Allow parallel computing
         if self.cfg['catalogue'].getboolean('use_multiprocessing', True):
-            self.pool = multiprocessing.Pool()
+            # Ask for 6 processes so that all 6 bands can run in parallel,
+            # even if the number of cores is less than 6
+            self.pool = multiprocessing.Pool(processes=6)
             self.cpumap = self.pool.imap
         else:
             self.cpumap = map #itertools  # Simple sequential processing
