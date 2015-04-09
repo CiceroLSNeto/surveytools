@@ -428,9 +428,15 @@ class VphasFrame(object):
         """Returns a Daophot object, pre-configured to work on the image."""
         image_path = '{0}[{1}]'.format(self.filename, self.extension)
         from .daophot import Daophot
+        # Allow fwhmpsf to be overriden such that all frames can require
+        # the same aperture correction
+        if 'fwhmpsf' in kwargs:
+            session_fwhmpsf = kwargs['fwhmpsf']
+        else:
+            session_fwhmpsf = self.psf_fwhm
         dp = Daophot(image_path, workdir=self.workdir,
                      datamin=self.datamin, datamax=self.datamax,
-                     epadu=self.gain, fwhmpsf=self.psf_fwhm,
+                     epadu=self.gain, fwhmpsf=session_fwhmpsf,
                      itime=self.exposure_time,
                      ratio=self.psf_ratio, readnoi=self.readnoise,
                      sigma=self.sky_sigma, theta=self.psf_theta,
@@ -772,14 +778,14 @@ class VphasOffsetCatalogue(object):
     def _get_image_filenames(self, ccdlist=range(1, 33)):
         """Returns a dictionary mapping band names onto the image filenames."""
         offset = footprint.VphasOffset(self.name)
-        image_fn = offset.get_red_filenames()
+        images = offset.get_red_filenames()
         if self.cfg['catalogue'].getboolean('include_ugr', True):
             try:
-                image_fn.update(offset.get_blue_filenames())
+                images.update(offset.get_blue_filenames())
             except footprint.NotObservedException as e:
                 log.warning(e)  # tolerate a missing blue concat
-        log.debug('{0}: filenames found: {1}'.format(self.name, image_fn))
-        return image_fn
+        log.debug('{0}: filenames found: {1}'.format(self.name, images))
+        return images
 
     @timed
     def create_catalogue(self, ccdlist=range(1, 33)):
@@ -796,19 +802,30 @@ class VphasOffsetCatalogue(object):
         """
         with log.log_to_file(os.path.join(self.workdir, 'catalogue.log')):
             try:
-                image_fn = self._get_image_filenames(ccdlist=ccdlist)
+                images = self._get_image_filenames(ccdlist=ccdlist)
             except footprint.NotObservedException as e:  # No data!
                 log.error(e)
                 return
-            # Having obtained filenames, compute the catalogue for each ccd
+            # Obtain the median psf fwhm
+            median_fwhmpsf = {}
+            for band, filename in images.items():
+                seeing = []
+                fts = fits.open(os.path.join(self.cfg['vphas']['datadir'], filename))
+                for ccd in ccdlist:
+                    seeing.append(fts[ccd].header['SEEING'])
+                median_fwhmpsf[band] = np.median(seeing)
+                del fts
+            log.info('Median fwhmpsf (px): {}'.format(median_fwhmpsf))
+            # Compute the catalogue for each ccd
             framecats = []
             for ccd in ccdlist:
-                framecats.append(self.create_ccd_catalogue(images=image_fn,
+                framecats.append(self.create_ccd_catalogue(images=images,
+                                                           median_fwhmpsf=median_fwhmpsf, 
                                                            ccd=ccd))
             catalogue = table.vstack(framecats, metadata_conflicts='silent')
             if self.save_diagnostics:
                 self.plot_diagnostics(catalogue)
-                self._plot_psf_overview(bands=image_fn.keys())
+                self._plot_psf_overview(bands=images.keys())
             # This is probably unnecessary
             import gc
             log.debug('gc.collect freed {0} bytes'.format(gc.collect()))
@@ -869,7 +886,7 @@ class VphasOffsetCatalogue(object):
             pl.close(fig)
 
     @timed
-    def create_ccd_catalogue(self, images, ccd=1):
+    def create_ccd_catalogue(self, images, median_fwhmpsf, ccd=1):
         """Create a multi-band catalogue for the area covered by a single ccd.
 
         Parameters
@@ -920,6 +937,7 @@ class VphasOffsetCatalogue(object):
         jobs = []
         for band in bandorder:
             params = {'frame': frames[band],
+                      'fwhmpsf': median_fwhmpsf[band],
                       'ra': sourcetbl['ra'],
                       'dec': sourcetbl['dec'],
                       'ra_psf': psf_table['ra'],
@@ -1196,6 +1214,7 @@ def photometry_task(par):
               par['dec'],
               ra_psf=par['ra_psf'],
               dec_psf=par['dec_psf'],
+              fwhmpsf=par['fwhmpsf'],
               psfrad_fwhm=float(conf.get('psfrad_fwhm', 4.)),
               fitrad_fwhm=float(conf.get('fitrad_fwhm', 1.)),
               maxiter=int(conf.get('maxiter', 10)),
