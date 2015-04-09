@@ -428,13 +428,9 @@ class VphasFrame(object):
         """Returns a Daophot object, pre-configured to work on the image."""
         image_path = '{0}[{1}]'.format(self.filename, self.extension)
         from .daophot import Daophot
-        # Allow fwhmpsf to be imposed such that all frames can require
-        # the same aperture correction
-        if 'fwhmpsf' not in kwargs:
-            kwargs['fwhmpsf'] = self.psf_fwhm
         dp = Daophot(image_path, workdir=self.workdir,
                      datamin=self.datamin, datamax=self.datamax,
-                     epadu=self.gain,
+                     epadu=self.gain, fwhmpsf=self.psf_fwhm,
                      itime=self.exposure_time,
                      ratio=self.psf_ratio, readnoi=self.readnoise,
                      sigma=self.sky_sigma, theta=self.psf_theta,
@@ -806,21 +802,10 @@ class VphasOffsetCatalogue(object):
             except footprint.NotObservedException as e:  # No data!
                 log.error(e)
                 return
-            # Obtain the median psf fwhm
-            median_fwhmpsf = {}
-            for band, filename in images.items():
-                seeing = []
-                fts = fits.open(os.path.join(self.cfg['vphas']['datadir'], filename))
-                for ccd in ccdlist:
-                    seeing.append(fts[ccd].header['SEEING'])
-                median_fwhmpsf[band] = np.median(seeing)
-                del fts
-            log.info('Median fwhmpsf (px): {}'.format(median_fwhmpsf))
             # Compute the catalogue for each ccd
             framecats = []
             for ccd in ccdlist:
-                framecats.append(self.create_ccd_catalogue(images=images,
-                                                           median_fwhmpsf=median_fwhmpsf, 
+                framecats.append(self.create_ccd_catalogue(images=images, 
                                                            ccd=ccd))
             catalogue = table.vstack(framecats, metadata_conflicts='silent')
             if self.save_diagnostics:
@@ -886,7 +871,7 @@ class VphasOffsetCatalogue(object):
             pl.close(fig)
 
     @timed
-    def create_ccd_catalogue(self, images, median_fwhmpsf, ccd=1):
+    def create_ccd_catalogue(self, images, ccd=1):
         """Create a multi-band catalogue for the area covered by a single ccd.
 
         Parameters
@@ -937,7 +922,6 @@ class VphasOffsetCatalogue(object):
         jobs = []
         for band in bandorder:
             params = {'frame': frames[band],
-                      'fwhmpsf': median_fwhmpsf[band],
                       'ra': sourcetbl['ra'],
                       'dec': sourcetbl['dec'],
                       'ra_psf': psf_table['ra'],
@@ -1214,7 +1198,6 @@ def photometry_task(par):
               par['dec'],
               ra_psf=par['ra_psf'],
               dec_psf=par['dec_psf'],
-              fwhmpsf=par['fwhmpsf'],
               psfrad_fwhm=float(conf.get('psfrad_fwhm', 4.)),
               fitrad_fwhm=float(conf.get('fitrad_fwhm', 1.)),
               maxiter=int(conf.get('maxiter', 10)),
