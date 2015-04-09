@@ -1196,14 +1196,17 @@ def photometry_task(par):
               par['dec'],
               ra_psf=par['ra_psf'],
               dec_psf=par['dec_psf'],
-              psfrad_fwhm=float(conf.get('psfrad_fwhm', 8.)),
+              psfrad_fwhm=float(conf.get('psfrad_fwhm', 4.)),
               fitrad_fwhm=float(conf.get('fitrad_fwhm', 1.)),
               maxiter=int(conf.get('maxiter', 10)),
               maxnpsf=int(conf.get('maxnpsf', 60)),
               varorder=int(conf.get('varorder', 0)),
               mergerad_fwhm=float(conf.get('mergerad_fwhm', 0.)),
               annulus_fwhm=float(conf.get('annulus_fwhm', 4.)),
-              dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.))
+              dannulus_fwhm=float(conf.get('dannulus_fwhm', 2.)),
+              fitsky=conf.get('fitsky', 'no'),
+              sannulus_fwhm=float(conf.get('sannulus_fwhm', 1.)),
+              wsannulus_fwhm=float(conf.get('wsannulus_fwhm', 2.))
               )
     # Save the sky- and psf-subtracted images as diagnostics
     if par['cfg']['catalogue'].getboolean('save_diagnostics', True):
