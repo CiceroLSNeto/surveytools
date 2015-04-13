@@ -235,7 +235,7 @@ class VphasOffset():
         return meta
 
 
-class VphasPlannedFootprint():
+class VphasFootprint():
 
     def __init__(self):
         pass
@@ -254,6 +254,7 @@ class VphasPlannedFootprint():
         The implementation looks ugly because it has been optimized for speed.
         """
         tbl = self.get_field_table()
+        # Offset centres in equatorial
         cosdec = np.cos(np.radians(tbl['dec']))
         cntr = {'ra_a': tbl['ra'],
                 'dec_a': tbl['dec'],
@@ -262,10 +263,11 @@ class VphasPlannedFootprint():
                 'ra_c': tbl['ra'] - (300/3600.) / cosdec,
                 'dec_c': tbl['dec'] + (350/3600.),
                 }
-        for pos in ['a', 'b', 'c']:  # Convert to Galactic
+        # Offsets centres in galactic system
+        for pos in ['a', 'b', 'c']:
             cntr['l_'+pos], cntr['b_'+pos] = self._icrs2gal(cntr['ra_'+pos], cntr['dec_'+pos])
         # Compute the corners of the field in ICRS and galactic coordinates
-        # this is very ugly because it is optimized for speed
+        # this code is ugly because it is optimized for speed
         cornershifts = [[-0.5,-0.5], [-0.5,+0.5], [+0.5, +0.5], [+0.5, -0.5], [-0.5,-0.5]]
         polygons = {}
         polygons_gal = {}
@@ -273,8 +275,8 @@ class VphasPlannedFootprint():
             corners_ra, corners_dec = [], []
             corners_l, corners_b = [], []
             for idx, shift in enumerate(cornershifts):
-                ra = cntr['ra_a'] + shift[0] / cosdec
-                dec = cntr['dec_a'] + shift[1]
+                ra = cntr['ra_'+pos] + shift[0] / cosdec
+                dec = cntr['dec_'+pos] + shift[1]
                 corners_ra.append(ra)
                 corners_dec.append(dec)
                 l, b = self._icrs2gal(ra, dec)
@@ -309,7 +311,7 @@ class VphasPlannedFootprint():
         return [gal.l.deg, gal.b.deg]
 
     @timed
-    def plot(self):
+    def plot(self, offsets=None):
         """
         Parameters
         -----------
@@ -317,6 +319,8 @@ class VphasPlannedFootprint():
             each tuple should be composed of (fieldlist, colour, title), e.g.
             [(['0001a', '0002a'], '#e41a1c', 'u,g,r observed')]
         """
+        if offsets is None:
+            offsets = self.offsets
         fig = pl.figure(figsize=(7.5, 4)) #7,5
         fig.subplots_adjust(0.08, 0.04, 0.96, 0.99, wspace=0.15, hspace=0.15)
         glat1 = -11
@@ -329,42 +333,35 @@ class VphasPlannedFootprint():
                                 right=0.98, top=0.87, 
                                 hspace=0.2, wspace=0.2)
 
-            for name in self.offsets.keys():
-                if name.endswith('a'):
-                    poly = mpl.patches.Polygon(self.offsets[name]['polygon_gal'],
-                                                      alpha=1,
-                                                      facecolor="#dddddd", 
-                                                      edgecolor="#999999",
-                                                      zorder=-100)
-                    ax.add_patch(poly)
-            """
-            for fieldno, f in enumerate(fields):
-                if (f[0][0] < xstart[i]-5 ) or (f[0][0] > xstart[i]+stepsize+5 ):
-                    continue
-                
-                if finished_mask[fieldno]:
-                    poly = matplotlib.patches.Polygon(f, alpha=1,
-                                                      facecolor="#4daf4a", 
-                                                      edgecolor="#222222")
-                    poly_finished.append(poly)
-                elif hari_mask[fieldno]:
-                    poly = matplotlib.patches.Polygon(f, alpha=1,
-                                                      facecolor="#e41a1c",
-                                                      edgecolor="#222222")
-                    poly_hari.append(poly)
-                elif ugr_mask[fieldno]:
-                    poly = matplotlib.patches.Polygon(f, alpha=1,
-                                                      facecolor="#377eb8",
-                                                      edgecolor="#222222")
-                    poly_ugr.append(poly)
-                else:
-                    poly = matplotlib.patches.Polygon(f, alpha=1.,
-                                                      facecolor="#dddddd", 
-                                                      edgecolor="#999999",
-                                                      zorder=-100)
-                    poly_notstarted.append(poly)
-                ax.add_patch(poly) 
-            """
+            patches = {}
+            for name in offsets:
+                try:
+                    facecolor = offsets[name]['facecolor']
+                except KeyError:
+                    facecolor = "#dddddd"
+                try:
+                    edgecolor = offsets[name]['edgecolor']
+                except KeyError:
+                    edgecolor = "#999999"
+                try:
+                    zorder = offsets[name]['zorder']
+                except KeyError:
+                    zorder = -100
+                try:
+                    label = offsets[name]['label']
+                except KeyError:
+                    label = 'planned'
+                poly = mpl.patches.Polygon(offsets[name]['polygon_gal'],
+                                                  alpha=1,
+                                                  facecolor=facecolor, 
+                                                  edgecolor=edgecolor,
+                                                  zorder=zorder)
+                try:
+                    patches[label].append(poly)
+                except KeyError:
+                    patches[label] = [poly]
+                ax.add_patch(poly)
+
             glon1 = xstart[i]
             glon2 = glon1+stepsize
             
@@ -376,28 +373,12 @@ class VphasPlannedFootprint():
             ax.yaxis.set_minor_locator( pl.MultipleLocator(base=1.0) )
             ax.xaxis.set_major_formatter( pl.FuncFormatter(glon_formatter) )
             ax.yaxis.set_major_formatter( pl.FuncFormatter(glat_formatter) )
-            """
-            if i == 0:
-                legend((poly_finished[0], poly_ugr[0], poly_hari[0], poly_notstarted[0]),
-                       ('u,g,r and H$\\mathrm{\\alpha}$,r,i observed',
-                        'u,g,r observed',
-                        'H$\\textrm{\\alpha}$,r,i observed',
-                        'Awaiting observation'),
-                       fontsize=9,
-                       bbox_to_anchor=(0., 1.1, 1., .102),
-                       loc=3,
-                       ncol=4,
-                       borderaxespad=0.,
-                       handlelength=0.8,
-                       frameon=False )
-            """
             if i == 1:
-                ax.set_xlabel("Galactic longitude ($l$)", fontsize=11)
+                ax.set_xlabel("Galactic longitude ($l$)", fontsize=10)
 
-
-        pl.ylabel("Galactic latitude ($b$)", fontsize=11)
+        pl.ylabel("Galactic latitude ($b$)", fontsize=10)
         pl.gca().yaxis.set_label_coords(-0.06, 1.)
-        return fig
+        return fig, patches
 
 
 ############
