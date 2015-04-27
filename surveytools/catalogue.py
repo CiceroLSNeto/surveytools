@@ -111,7 +111,6 @@ class VphasFrame(object):
         self.filename, self.extension = self._preprocess_image()
 
     def __del__(self):
-        #del self._cache['daophot']
         pass
 
     def __getstate__(self):
@@ -756,15 +755,20 @@ class VphasOffsetCatalogue(object):
         else:
             self.cpumap = map #itertools  # Simple sequential processing
 
-    def __del__(self):
-        """Destructor."""
-        # shutil.rmtree(self.workdir)
+    def clean(self):
+        """Removes the working directory and its contents."""
+        if self.cfg['catalogue'].getboolean('clean', True):
+            shutil.rmtree(self.workdir, ignore_errors=True)
         # Make sure to get rid of any multiprocessing-forked processes;
-        # they might be eating up a lot of memory!
+        # they might be eating up memory!
         try:
             self.pool.terminate()
         except AttributeError:
-            pass  # only applies to a multiprocessing.pool.Pool object
+            pass  # there may not have been a multiprocessing Pool
+
+    def __del__(self):
+        """Destructor."""
+        self.clean()
 
     @property
     def save_diagnostics(self):
@@ -818,6 +822,7 @@ class VphasOffsetCatalogue(object):
                      .format(self.name, self.workdir))
             # Returns the catalogue as an astropy table
             return catalogue
+
 
     def _plot_psf_overview(self, bands):
         """Saves a pretty plot showing the PSF in each band.
@@ -1217,3 +1222,16 @@ def photometry_task(par):
         par['frame'].plot_subtracted_images(nostars_fn=fn[0], nosky_fn=fn[1],
                                             psf_fn=fn[2])
     return tbl
+
+
+def make(offset, ccdlist=range(1, 33), overwrite=True):
+    try:
+        vpc = VphasOffsetCatalogue(offset)
+        cat = vpc.create_catalogue(ccdlist=ccdlist)
+        out_fn = os.path.join(vpc.cfg['catalogue']['destdir'], '{0}-cat.fits'.format(vpc.name))
+        log.info('Writing {0}'.format(out_fn))
+        cat.write(out_fn, overwrite=overwrite)
+    except Exception as e:
+        log.error(e)
+    finally:
+        vpc.clean()
