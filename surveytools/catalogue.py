@@ -87,22 +87,23 @@ class VphasFrame(object):
         Extension of the image in the FITS file. (default: 0)
     """
     def __init__(self, filename, extension=0, cfg=None, workdir=None):
-        if os.path.exists(filename):
-            self.orig_filename = filename
-        elif os.path.exists(os.path.join(cfg['vphas']['datadir'], filename)):
-            self.orig_filename = os.path.join(cfg['vphas']['datadir'], filename)
-        else:
-            raise IOError('File not found:' + os.path.join(cfg['vphas']['datadir'], filename))
-        self.orig_extension = extension
         # Setup configuration
         if cfg is None:
             self.cfg = configparser.ConfigParser()
             self.cfg.read(DEFAULT_CONFIG)
         else:
             self.cfg = cfg
+        # Verify the image path and extension
+        if os.path.exists(filename):
+            self.orig_filename = filename
+        elif os.path.exists(os.path.join(self.cfg['vphas']['datadir'], filename)):
+            self.orig_filename = os.path.join(self.cfg['vphas']['datadir'], filename)
+        else:
+            raise IOError('File not found:' + os.path.join(self.cfg['vphas']['datadir'], filename))
+        self.orig_extension = extension
         # Setup the workdir
         if workdir is None:
-            workdir_root = cfg['vphas']['workdir']
+            workdir_root = self.cfg['vphas']['workdir']
         else:
             workdir_root = workdir
         self.workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension),
@@ -565,7 +566,7 @@ class VphasFrame(object):
         tbl['CHI'].name = 'chi_' + self.band
         tbl['SHARPNESS'].name = 'sharpness_' + self.band
         tbl['PIER_ALLSTAR'].name = 'pier_' + self.band
-        tbl['PERROR_ALLSTAR'].name = 'perror_' + self.band
+        tbl['PERROR_ALLSTAR'].name = 'error_' + self.band
         tbl['MAG_PHOT'].name = 'aperMag_' + self.band
         tbl['MERR_PHOT'].name = 'aperMagErr_' + self.band
         tbl['SNR'].name = 'snr_' + self.band
@@ -581,29 +582,45 @@ class VphasFrame(object):
                                         message='Attribute `keywords`(.*)')
                 tbl_fn = os.path.join(self.workdir, 'photometry.fits')
                 log.debug('{0}: writing photometry to {1}'.format(self.band, tbl_fn))
-                tbl.write(tbl_fn)
+                tbl.write(tbl_fn, overwrite=True)
 
-        # Mask untrustworthy magnitude estimates at low or negative SNR
-        mask_too_faint = (
+        # Flag untrustworthy magnitude estimates at low or negative SNR
+        flag_too_faint = (
                              (tbl['snr_' + self.band].filled(-1) < 3)
                              | (tbl[self.band].filled(999) > tbl['magLim_' + self.band])
                           )
-        for prefix in ['', 'err_', 'aperMag_', 'aperMagErr_']:
-            tbl[prefix + self.band].mask[mask_too_faint] = True
-
-        # Mask PSF magnitudes if not fitted without error, the position should not
-        # have shifted, and the CHI score must be decent.
-        chi_max = float(self.cfg['photometry'].get('chi_max', 3.))
+        # Flag when whe position fit has shifted too far away
         shift_max = float(self.cfg['photometry'].get('shift_max', 1.))
-        mask_bad_fit = (
+        flag_shifted = tbl['pixelShift_' + self.band].filled(999) > shift_max
+        # Flag when the source is off the image
+        flag_off_image = tbl['error_' + self.band].filled('') == 'Off_image'
+        # Flag bad fits
+        chi_max = float(self.cfg['photometry'].get('chi_max', 3.))
+        flag_bad_fit = (
                         np.isnan(tbl[self.band].filled(np.nan))
                         | (tbl['pier_' + self.band].filled(0) != 0)
                         | (tbl['chi_' + self.band].filled(999) > chi_max)
-                        | (tbl['pixelShift_' + self.band].filled(999) > shift_max)
-                    )
-        for prefix in ['ra_', 'dec_', '', 'err_']:
-            tbl[prefix + self.band].mask[mask_bad_fit] = True 
-            
+                       )
+
+        # Now use the above flags to mask out column values
+        # First mask out PSF photometry for faint/shifted/bad fits
+        mask_psfphot = flag_too_faint | flag_shifted | flag_bad_fit
+        for prefix in ['', 'err_']:
+            tbl[prefix + self.band].mask[mask_psfphot] = True        
+        # Mask out aperture photometry for faint/shifted fits
+        mask_aperphot = flag_too_faint | flag_shifted
+        for prefix in ['aperMag_', 'aperMagErr_']:
+            tbl[prefix + self.band].mask[mask_aperphot] = True
+        # Mask out all properties for shifted or off-image fits
+        mask_all = flag_shifted | flag_off_image
+        for prefix in ['ra_', 'dec_', 'chi_', 'sharpness_', 'sky_', 'snr_', 'magLim_']:
+            tbl[prefix + self.band].mask[mask_all] = True
+
+        # Make the error messages more informative
+        tbl['error_' + self.band][flag_shifted | flag_bad_fit] = 'Bad_fit'
+        tbl['error_' + self.band][flag_too_faint] = 'Too_faint'
+        tbl['error_' + self.band][flag_off_image] = 'Off_image'
+
         # The "clean" quality flag helps the user select good sources
         tbl['clean_' + self.band] = (
                                     ~tbl[self.band].mask
@@ -623,8 +640,7 @@ class VphasFrame(object):
                    'chi_' + self.band,
                    'sharpness_' + self.band,
                    'sky_' + self.band,
-                   'pier_' + self.band,
-                   'perror_' + self.band,
+                   'error_' + self.band,
                    'aperMag_' + self.band,
                    'aperMagErr_' + self.band,
                    'snr_' + self.band,
@@ -635,6 +651,12 @@ class VphasFrame(object):
                    'nndist_' + self.band,
                    'pixelShift_' + self.band,
                    'clean_' + self.band]
+
+        # Make sure all floating point columns have NaN as the fill value
+        for colname in columns:
+            if tbl[colname].dtype.kind == 'f':
+                tbl[colname].fill_value = np.nan
+
         return tbl[columns]
 
     @timed
@@ -1227,11 +1249,17 @@ def photometry_task(par):
 def make(offset, ccdlist=range(1, 33), overwrite=True):
     try:
         vpc = VphasOffsetCatalogue(offset)
-        cat = vpc.create_catalogue(ccdlist=ccdlist)
-        out_fn = os.path.join(vpc.cfg['catalogue']['destdir'], '{0}-cat.fits'.format(vpc.name))
-        log.info('Writing {0}'.format(out_fn))
-        cat.write(out_fn, overwrite=overwrite)
+        for ccd in ccdlist:
+            try:
+                cat = vpc.create_catalogue(ccdlist=[ccd])
+                out_fn = os.path.join(vpc.cfg['catalogue']['destdir'], '{0}-{1}-cat.fits'.format(vpc.name, ccd))
+                log.info('Writing {0}'.format(out_fn))
+                cat.write(out_fn, overwrite=overwrite)
+            except Exception as e:
+                log.error(e)
+                raise e
     except Exception as e:
         log.error(e)
+        raise e
     finally:
         vpc.clean()
