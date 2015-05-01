@@ -51,16 +51,25 @@ class Daophot(object):
 
     The speed of psf and allstar tasks are mostly affected by the psfrad
     and psfnmax parameters.
+
+    Parameters
+    ----------
+    image_path : str
+        Path to the FITS file to be analyzed by DAOPHOT.
+
+    workdir : str
+        Path to a directory where we may write temporary files. Note that,
+        at present, this module does NOT clean up temporary files after itself,
+        that is left to the caller (for the sake of enabling temporary files
+        to be inspected for debugging).
+
+    (iraf parameters) : see _setup_iraf for a full list of supported settings.
     """
     def __init__(self, image_path, workdir='/tmp', **kwargs):
         self.workdir = tempfile.mkdtemp(prefix='daophot-', dir=workdir)
         self._path_cache = {}
         self._path_cache['image_path'] = image_path
         self._setup_iraf(**kwargs)
-
-    def __del__(self):
-        """Destructor; cleans up the temporary directory."""
-        pass  # shutil.rmtree(self.workdir)
 
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
                     fitsky='no', function='moffat25', fwhmpsf=3., itime=10.,

@@ -67,7 +67,7 @@ from .utils import cached_property, timed, coalesce
 from . import footprint
 
 
-DEFAULT_CONFIG = os.path.join(SURVEYTOOLS_CONFIGDIR, 'catalogue.ini')
+DEFAULT_CONFIGFILE = os.path.join(SURVEYTOOLS_CONFIGDIR, 'catalogue.ini')
 
 ###########
 # CLASSES
@@ -90,7 +90,7 @@ class VphasFrame(object):
         # Setup configuration
         if cfg is None:
             self.cfg = configparser.ConfigParser()
-            self.cfg.read(DEFAULT_CONFIG)
+            self.cfg.read(DEFAULT_CONFIGFILE)
         else:
             self.cfg = cfg
         # Verify the image path and extension
@@ -743,12 +743,12 @@ class VphasOffsetCatalogue(object):
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
 
-    config : str
-        Filename of the ".ini" file that contains the configuration parameters.
-        By default, the catalogue.ini file that comes with the package will be
-        used.
+    configfile : str
+        Filename of a *.ini file that contains the configuration parameters.
+        If `None`, then the default catalogue.ini file that comes with the
+        package will be used.
     """
-    def __init__(self, name, config=DEFAULT_CONFIG, **kwargs):
+    def __init__(self, name, configfile=None, **kwargs):
         # Offset name must be a string of the form "0001a".
         if len(name) != 5 or not name.endswith(('a', 'b', 'c')):
             raise ValueError('"{0}" is an illegal offset name. '
@@ -757,9 +757,11 @@ class VphasOffsetCatalogue(object):
         self.name = name
         self.kwargs = kwargs
         # Read the configuration
-        self.config = config
+        if configfile is None:
+            configfile = DEFAULT_CONFIGFILE
+        self.configfile = configfile
         self.cfg = configparser.ConfigParser()
-        self.cfg.read(config)
+        self.cfg.read(configfile)
         # Make sure the root working directory exists
         try:
             os.mkdir(self.cfg['vphas']['workdir'])
@@ -985,12 +987,11 @@ class VphasOffsetCatalogue(object):
         merged['field'] = self.name
         merged['ccd'] = ccd
         merged['r_i'] = merged['r'] - merged['i']
-        merged['r_ha'] = merged['r'] - merged['ha']
+        merged['r_ha'] = merged['r'] - merged['ha']  
         if 'u' in frames:
             merged['u_g'] = merged['u'] - merged['g']
             merged['g_r'] = merged['g'] - merged['r']
-            merged['clean'] = (merged['clean_u'].filled(False) &
-                               merged['clean_g'].filled(False) &
+            merged['clean'] = (merged['clean_g'].filled(False) &
                                merged['clean_r'].filled(False) &
                                merged['clean_i'].filled(False) &
                                merged['clean_ha'].filled(False))
@@ -1246,13 +1247,15 @@ def photometry_task(par):
     return tbl
 
 
-def make(offset, ccdlist=range(1, 33), overwrite=True):
+def vphas_offset_catalogue(offset, ccdlist=range(1, 33), overwrite=True, configfile=None):
+    """Make a catalogue."""
     try:
-        vpc = VphasOffsetCatalogue(offset)
+        vpc = VphasOffsetCatalogue(offset, configfile=configfile)
         for ccd in ccdlist:
             try:
                 cat = vpc.create_catalogue(ccdlist=[ccd])
-                out_fn = os.path.join(vpc.cfg['catalogue']['destdir'], '{0}-{1}-cat.fits'.format(vpc.name, ccd))
+                out_fn = os.path.join(vpc.cfg['catalogue']['destdir'],
+                                      '{0}-{1}-cat.fits'.format(vpc.name, ccd))
                 log.info('Writing {0}'.format(out_fn))
                 cat.write(out_fn, overwrite=overwrite)
             except Exception as e:
@@ -1263,3 +1266,28 @@ def make(offset, ccdlist=range(1, 33), overwrite=True):
         raise e
     finally:
         vpc.clean()
+
+
+def vphas_offset_catalogue_main(args=None):
+    """Command-line interface to create an offset catalogue."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Create a multi-band catalogue for a single VPHAS offset '
+                    'pointing.')
+    parser.add_argument('-c', '--config', metavar='configfile',
+                        type=str, default=None,
+                        help='Configuration file.')
+    parser.add_argument('-e', '--extension', metavar='CCD',
+                        type=int, default=None,
+                        help='CCD extension number.')
+    parser.add_argument('offset', nargs='+',
+                        help='Offset name, e.g. 0001a or 0001b.')
+    args = parser.parse_args(args)
+
+    for offset in args.offset:
+        if args.extension is not None:
+            ccdlist = [args.extension]
+        else:
+            ccdlist=range(1, 33)
+        vphas_offset_catalogue(offset, ccdlist=ccdlist, configfile=args.config)
