@@ -4,17 +4,14 @@ TODO
 Catalogue
 ---------
 * What sigma to use for i-band detection step? 2 seems better for sparse; 1 for dense? (review sigma estimate?)
-* Ensure the merged output catalogue has the right column order of bands.
 * Is the photometry for stars at the edges of masked-out areas reliable?
-* Avoid pyraf from doing: "Created directory /home/gb/dev/surveytools/sandbox/catalogue/pyraf for cache"
 * Can reduce maxnpsf during source list building?
 
 Offset catalogues
 ~~~~~~~~~~~~~~~~~
 * Give proper error messages in the catalogue, e.g. "Chi score too high".
-* Verify a10 completeness.
+* Verify "clean" completeness.
 * Produce diagnostic ccd/cmd plots.
-* Check if the photometry for stars at the edges of masked-out areas reliable?
 * msky vs mstar diagnostic plot (no relationship expected)
 * mstar vs chi diagnostic plot (no relationship expected)
 * Take care of both aperture correction & calibration using APASS.
