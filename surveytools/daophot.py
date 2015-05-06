@@ -197,6 +197,8 @@ class Daophot(object):
             iraf.unlearn(module)
         # Avoid the "Out of space in image header" exception
         iraf.set(min_lenuserarea=640000)
+        # Allow overwriting files
+        iraf.set(clobber="yes")
         # Set data-dependent IRAF/DAOPHOT configuration parameters
         iraf.datapars.fwhmpsf = fwhmpsf   # [pixels]
         iraf.datapars.sigma = sigma       # sigma(background) [ADU]
@@ -334,9 +336,7 @@ class Daophot(object):
                               pstfile=output_path,
                               verify='no',
                               interactive='no',
-                              verbose='yes',
-                              Stdout=str(os.path.join(self.workdir,
-                                                      'log-pstselect.txt')))
+                              verbose='no')
         iraf.daophot.pstselect(**pstselect_args)
         # Prune the selected stars using sigma-clipping on the sky count
         if prune_outliers:
