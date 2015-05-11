@@ -1,4 +1,4 @@
-name: root
+name: surveytools
 dependencies:
 - _license=1.1=py34_0
 - abstract-rendering=0.5.1=np19py34_0
@@ -25,7 +25,6 @@ dependencies:
 - chaco=4.4.1=np19py27_0
 - clyent=0.3.4=py34_0
 - colorama=0.3.3=py34_0
-- conda=3.11.0=py34_0
 - conda-env=2.1.4=py34_0
 - configobj=5.0.6=py34_0
 - cryptography=0.8=py34_0
@@ -187,24 +186,15 @@ dependencies:
 - zeromq=4.0.4=0
 - zlib=1.2.8=0
 - pip:
-  - astropy (/local/home/gb/dev/astropy)==1.1.dev11998
-  - astroquery (/local/home/gb/dev/astroquery)==0.3.dev2698
   - beautifulsoup4==4.3.2
   - d2to1==0.2.11
-  - descartes==1.0.1
-  - html5lib==1.0b3
-  - imageio==1.1
-  - images2gif==1.0.1
-  - k2flix==1.0.0
-  - oauthlib==0.7.2
+  - imageio==1.2
   - photutils==0.1
   - pyfits==3.3
-  - pyraf==2.2.dev0
-  - requests-oauthlib==0.4.2
+  - pyraf==2.1.8
   - rope-py3k-0.9.4==1
   - stsci.distutils==0.3.7
   - stsci.tools==3.2.2
-  - surveytools (/local/home/gb/dev/surveytools)==0.1
+  - surveytools (/home/gb/dev/surveytools)==0.1
   - tables==3.1.1
-  - twython==3.2.0
 
