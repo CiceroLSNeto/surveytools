@@ -1,13 +1,12 @@
-#!/bin/sh -f
+#!/bin/bash -f
 # Creates a catalogue for a given OFFSET                                                         
-#PBS -l nodes=1:ppn=6
+#PBS -l nodes=1:ppn=5
 #PBS -k oe                                                          
 #PBS -q cmain
-#PBS -l walltime=11:59:00
-#PBS -m abe
-NP=`cat ${PBS_NODEFILE} | wc -l`
+#PBS -l walltime=23:59:00
+#PBS -m a
 
-echo $1
+echo `date`
 echo ------------------------------------------------------
 echo -n 'Started catalogueing '; cat ${OFFSET}
 echo -n 'Job is running on node '; cat $PBS_NODEFILE
@@ -28,9 +27,16 @@ echo ------------------------------------------------------
 export PATH=/home/gb/bin/anaconda/bin:$PATH
 source activate surveytools
 
-# Run the cataloguing script
-cd /car-data/gb/vphas/psfcat/
-vphas-offset-catalogue ${OFFSET} -c config.ini
+# Tell pyraf where IRAF lives
+export iraf='~/bin/iraf'
+export IRAFARCH='linux64'
+
+# Ensure IRAF writes any caching files to /tmp
+cd /tmp
+
+# Run the cataloguing procedure
+ionice -c3 nice -n15 vphas-offset-catalogue ${OFFSET} -c /car-data/gb/vphas/psfcat/config.ini
 
 echo ------------------------------------------------------                                  
 echo Job ends
+echo `date`
