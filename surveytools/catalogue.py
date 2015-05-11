@@ -1279,23 +1279,19 @@ def photometry_task(par):
 def vphas_offset_catalogue(offset, ccdlist=range(1, 33),
                            configfile=None, overwrite=True):
     """Make a catalogue."""
-    try:
-        vpc = VphasOffsetCatalogue(offset, configfile=configfile)
-        for ccd in ccdlist:
-            try:
-                cat = vpc.create_catalogue(ccdlist=[ccd])
-                out_fn = os.path.join(vpc.cfg['catalogue']['destdir'],
-                                      '{0}-{1}-cat.fits'.format(vpc.name, ccd))
-                log.info('Writing {0}'.format(out_fn))
-                cat.write(out_fn, overwrite=overwrite)
-            except Exception as e:
-                log.error(e)
-                raise e
-    except Exception as e:
-        log.error(e)
-        raise e
-    finally:
-        vpc.clean()
+    for ccd in ccdlist:
+        try:
+            vpc = VphasOffsetCatalogue(offset, configfile=configfile)
+            cat = vpc.create_catalogue(ccdlist=[ccd])
+            out_fn = os.path.join(vpc.cfg['catalogue']['destdir'],
+                                  '{0}-{1}-cat.fits'.format(vpc.name, ccd))
+            log.info('Writing {0}'.format(out_fn))
+            cat.write(out_fn, overwrite=overwrite)
+            vpc.clean()
+        except Exception as e:
+            log.error(e)
+        finally:
+            vpc.clean()
 
 
 def vphas_offset_catalogue_main(args=None):
