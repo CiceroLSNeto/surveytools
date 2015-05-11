@@ -23,6 +23,34 @@ $ python setup.py install
 ```
 Note that SurveyTools has only been tested in Linux at present.
 
+The above command is sufficient for most features.
+For the catalogue-generating module, however,
+IRAF needs to be installed and the environment variables
+`iraf` and `IRAFARCH` need to be set.
+On 64-bit Linux, the following sequence of commands
+installs and prepares IRAF v216 for use with surveytools:
+```
+mkdir ~/bin/iraf
+cd ~/bin/iraf
+wget ftp://iraf.noao.edu/iraf/v216/PCIX/iraf.lnux.x86_64.tar.gz
+tar -xf iraf.lnux.x86_64.tar.gz
+export iraf='~/bin/iraf'
+export IRAFARCH='linux64'
+```
+To prevent IRAF from making a "caching" directory in whatever
+directory you run it from, it is recommended that you initialize an `iraf` directory in your home dir: (optional)
+```
+mkdir ~/iraf
+cd ~/iraf
+~/bin/iraf/unix/hlib/mkiraf.sh
+```
+
+### Dependencies
+
+```
+astropy 1.0
+photutils 0.1
+```
 
 ### Using SurveyTools
 
@@ -44,7 +72,7 @@ from surveytools impot VphasOffsetCatalogue
 catalogue = VphasOffsetCatalogue('0149a').create_catalogue()
 catalogue.write('mycatalogue.fits')
 ```
-Note that the catalogue-generating software requires a working version of `pyraf` and `iraf` to be installed.
+
 
 
 ### Contributing
