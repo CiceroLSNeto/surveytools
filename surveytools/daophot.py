@@ -381,7 +381,6 @@ class Daophot(object):
                         verbose='yes',
                         Stdout=str(path_psf_log))
         iraf.daophot.psf(**psf_args)
-
         # It is possible for iraf.daophot.psf() to fail to converge.
         # In this case, we re-try with more easy-to-fit settings.
         success, norm_scatter = psf_success(path_psf_log, norm_scatter_limit)
@@ -415,10 +414,12 @@ class Daophot(object):
                     limit = norm_scatter_limit
                 success, norm_scatter = psf_success(path_psf_log,
                                                     norm_scatter_limit=limit)
-                log.warning('daophot.psf: norm_scatter on attempt '
-                            '#{0} = {1:.3f} (maxnpsf={2})'.format(attempt_no+2,
-                                                                  norm_scatter,
-                                                                  maxnpsf))
+                log.warning('daophot.psf: norm_scatter on attempt #{0} '
+                            '= {1:.3f} (maxnpsf={2})'
+                            ' [{3}]'.format(attempt_no+2,
+                                            norm_scatter,
+                                            maxnpsf,
+                                            self._path_cache['image_path']))
                 if success:
                     break
             # Restore the original config
@@ -571,7 +572,7 @@ def pstselect_prune(pstselect_output_path, new_path):
         bad_mask = sigma_clip(tbl['MSKY'].data, sig=sigma, iters=None).mask
         if bad_mask.sum() < 0.3*len(tbl):  # stop if <30% rejected
             break
-    log.info('Rejected {0} stars for PSF fitting'.format(bad_mask.sum()))
+    log.info('Rejected {} stars for PSF fitting {}'.format(bad_mask.sum(), new_path))
     # Now write the new file without the pruned objects to disk
     fh = open(new_path, 'w')
     fh.write("#N ID    XCENTER   YCENTER   MAG         MSKY\n"

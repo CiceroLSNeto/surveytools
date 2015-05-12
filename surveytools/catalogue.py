@@ -64,7 +64,7 @@ from photutils.background import Background
 
 from . import (SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT,
                VPHAS_PIXEL_SCALE, VPHAS_BANDS)
-from .utils import cached_property, timed, coalesce
+from .utils import cached_property, timed, coalesce, timeout
 from . import footprint
 
 
@@ -925,6 +925,7 @@ class VphasOffsetCatalogue(object):
             fig.savefig(output_fn, dpi=120, facecolor='black')
             pl.close(fig)
 
+    @timeout(1800)  # This should never take more than an hour
     def create_ccd_catalogue(self, images, ccd=1):
         """Create a multi-band catalogue for the area covered by a single ccd.
 
@@ -1307,7 +1308,7 @@ def vphas_offset_catalogue(offset, ccdlist=range(1, 33),
                 cat.write(out_fn, overwrite=overwrite)
             vpc.clean()
         except Exception as e:
-            log.error(e)
+            log.error('{}[{}]: {}'.format(offset, ccd, e))
         finally:
             vpc.clean()
 

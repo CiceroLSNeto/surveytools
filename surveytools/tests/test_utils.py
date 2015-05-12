@@ -1,6 +1,8 @@
 from surveytools.utils import angular_separation_degrees as sep
 from surveytools.utils import coalesce
+from surveytools.utils import timeout, TimeOutException
 
+import time
 import numpy as np
 from astropy.table import MaskedColumn
 
@@ -51,3 +53,17 @@ class TestCoalesce():
             coalesce(1)
         with pytest.raises(TypeError):
             coalesce([self.c1, 1])
+
+
+def test_timeout():
+    @timeout(1)
+    def somefunction():
+        time.sleep(2)
+    with pytest.raises(TimeOutException):
+        somefunction()
+
+def test_no_timeout():
+    @timeout(1)
+    def somefunction():
+        return
+    somefunction()
