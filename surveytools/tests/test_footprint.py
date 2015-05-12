@@ -1,7 +1,7 @@
 """Tests the surveytools.footprint module."""
 import numpy as np
 
-from surveytools.footprint import VphasPlannedFootprint, VphasOffset
+from surveytools.footprint import VphasFootprint, VphasOffset
 
 def test_vphas_offset_coordinates():
     """Test the offset pattern, which is expected to equal
@@ -9,7 +9,7 @@ def test_vphas_offset_coordinates():
     ra -588, dec +660 arcsec for the "b" pointing;
     ra -300, dec +350 arcsec for the "c" pointing.
     """
-    vf = VphasPlannedFootprint()
+    vf = VphasFootprint()
     np.testing.assert_almost_equal(vf.offsets['0001a']['ra'], 97.2192513369)
     np.testing.assert_almost_equal(vf.offsets['0001a']['dec'], 0)
     np.testing.assert_almost_equal(vf.offsets['0001b']['ra'], 97.2192513369 - 588/3600.)
@@ -19,7 +19,7 @@ def test_vphas_offset_coordinates():
 
 
 def test_vphas_offset_pattern():
-    vf = VphasPlannedFootprint()
+    vf = VphasFootprint()
     for field in ['0500', '1000', '2000']:
         ra, dec = vf.offsets[field+'a']['ra'], vf.offsets[field+'a']['dec']
         np.testing.assert_almost_equal(vf.offsets[field+'b']['ra'],

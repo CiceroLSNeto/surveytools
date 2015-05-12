@@ -4,7 +4,8 @@ from setuptools import setup
 entry_points = {'console_scripts': [
     'vst-pawplot = surveytools.quicklook:vst_pawplot_main',
     'vphas-quicklook = surveytools.quicklook:vphas_quicklook_main',
-    'vphas-filenames = surveytools.footprint:vphas_filenames_main'
+    'vphas-filenames = surveytools.footprint:vphas_filenames_main',
+    'vphas-offset-catalogue = surveytools.catalogue:vphas_offset_catalogue_main'
 ]}
 
 setup(name='surveytools',

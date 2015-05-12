@@ -24,7 +24,7 @@ defined as follows:
 -*offset*: a single position in the sky denoting one of the offsets that
            make up a field, denoted using a 5-character wide string,
            e.g. '0149a' (first offset), '0149b' (second offset),
-           '0149c' (third offset, for H-alpha and some g-band observations only).
+           '0149c' (third offset, for Halpha and some g observations only).
 -*exposure*: a single shutter opening, for VPHAS this always cooresponds to
              a single offset-band combination, e.g. '0149a-ha'.
 -*frame*: area covered by a single ccd of an exposure, e.g. '0149a-ha-8'.
@@ -62,12 +62,14 @@ import photutils
 import photutils.morphology
 from photutils.background import Background
 
-from . import SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT, VPHAS_PIXEL_SCALE, VPHAS_BANDS
-from .utils import cached_property, timed, coalesce
+from . import (SURVEYTOOLS_CONFIGDIR, OMEGACAM_CCD_ARRANGEMENT,
+               VPHAS_PIXEL_SCALE, VPHAS_BANDS)
+from .utils import cached_property, timed, coalesce, timeout
 from . import footprint
 
 
-DEFAULT_CONFIG = os.path.join(SURVEYTOOLS_CONFIGDIR, 'catalogue.ini')
+DEFAULT_CONFIGFILE = os.path.join(SURVEYTOOLS_CONFIGDIR, 'catalogue.ini')
+
 
 ###########
 # CLASSES
@@ -86,32 +88,33 @@ class VphasFrame(object):
     extension : int (optional)
         Extension of the image in the FITS file. (default: 0)
     """
-    def __init__(self, filename, extension=0, cfg=None, workdir=None):
-        if os.path.exists(filename):
-            self.orig_filename = filename
-        elif os.path.exists(os.path.join(cfg['vphas']['datadir'], filename)):
-            self.orig_filename = os.path.join(cfg['vphas']['datadir'], filename)
-        else:
-            raise IOError('File not found:' + os.path.join(cfg['vphas']['datadir'], filename))
-        self.orig_extension = extension
+    def __init__(self, filename, extension=1, cfg=None, workdir=None):
         # Setup configuration
         if cfg is None:
             self.cfg = configparser.ConfigParser()
-            self.cfg.read(DEFAULT_CONFIG)
+            self.cfg.read(DEFAULT_CONFIGFILE)
         else:
             self.cfg = cfg
+        # Verify the image path and extension
+        datadir = self.cfg['vphas']['datadir']
+        if os.path.exists(filename):
+            self.orig_filename = filename
+        elif os.path.exists(os.path.join(datadir, filename)):
+            self.orig_filename = os.path.join(datadir, filename)
+        else:
+            raise IOError('File not found:' + os.path.join(datadir, filename))
+        self.orig_extension = extension
         # Setup the workdir
         if workdir is None:
-            workdir_root = cfg['vphas']['workdir']
+            workdir_root = self.cfg['vphas']['workdir']
         else:
             workdir_root = workdir
-        self.workdir = tempfile.mkdtemp(prefix='frame-{0}-{1}-'.format(filename, extension),
+        self.workdir = tempfile.mkdtemp(prefix='frame-{}-{}-'.format(filename, extension),
                                         dir=workdir_root)
         self._cache = {}
         self.filename, self.extension = self._preprocess_image()
 
     def __del__(self):
-        #del self._cache['daophot']
         pass
 
     def __getstate__(self):
@@ -124,7 +127,6 @@ class VphasFrame(object):
                 pass
         return self.__dict__
 
-    @timed
     def _preprocess_image(self):
         """Prepare the image for photometry by IRAF.
 
@@ -143,7 +145,7 @@ class VphasFrame(object):
         -------
         (filename, extension): (str, int)
             Path and HDU number of the pre-processed FITS file.
-        """ 
+        """
         # Open the pipeline-processed image data
         fts = fits.open(self.orig_filename)
         hdu = fts[self.orig_extension]
@@ -151,7 +153,9 @@ class VphasFrame(object):
         # Twilight flats of the VST are known to be affected by scattered light
         # a separate illumination correction map is used to correct for this.
         if self.cfg['catalogue'].getboolean('apply_illumcor', True):
-            illumcor_fn = hdu.header['FLATSRC'].replace('flat', 'illum').split('[')[0]
+            illumcor_fn = (hdu.header['FLATSRC']
+                              .replace('flat', 'illum')
+                              .split('[')[0])
             illumcor_path = os.path.join(self.cfg['vphas']['datadir'], illumcor_fn)
             illumcor_hdu = fits.open(illumcor_path)[self.orig_extension]
             log.debug('{0}: applying illumcor: {1}'.format(fltr, illumcor_fn))
@@ -160,8 +164,10 @@ class VphasFrame(object):
         else:
             imgdata = hdu.data
         # Open the confidence map and create bad pixel mask
+        confmap_fn = hdu.header['CIR_CPM'].split('[')[0]
+        log.debug('Reading the confidence map {}.'.format(confmap_fn))
         self.confidence_map_path = os.path.join(self.cfg['vphas']['datadir'],
-                                                hdu.header['CIR_CPM'].split('[')[0])
+                                                confmap_fn)
         confmap_hdu = fits.open(self.confidence_map_path)[self.orig_extension]
         minconf = float(self.cfg['catalogue'].get('confidence_threshold', 80.))
         bad_pixel_mask = confmap_hdu.data < minconf
@@ -169,6 +175,7 @@ class VphasFrame(object):
         # Estimate the background in a mesh of (41, 32) pixels; which is chosen
         # to fit an integer number of times in the image size (4100, 2048).
         # At the pixel scale of 0.21 arcsec/px, this corresponds to ~10 arcsec.
+        log.debug('Measuring the background.')
         bg = Background(imgdata, (41, 32), filter_shape=(6, 6),
                         mask=bad_pixel_mask,
                         method='median', sigclip_sigma=3., sigclip_iters=5)
@@ -178,9 +185,11 @@ class VphasFrame(object):
         self.sky_sigma = bg.background_rms_median
         # Subtract the background, retaining the median sky level
         if self.cfg['catalogue'].getboolean('subtract_sky', True):
+            log.debug('Subtracting the background.')
             imgdata = imgdata - (bg.background - bg.background_median)
         # Apply bad pixel mask (will only work if IRAF's DATAMIN > -1)
         if self.cfg['catalogue'].getboolean('mask_bad_pixels', True):
+            log.debug('Masking out bad pixels.')
             imgdata[bad_pixel_mask] = -1
         # Write the processed image to an uncompressed FITS file for IRAF
         path = os.path.join(self.workdir, '{0}.fits'.format(fltr))
@@ -219,12 +228,12 @@ class VphasFrame(object):
 
     @cached_property
     def hdu(self):
-        """FITS HDU object corresponding to the measured image (after sky subtraction)."""
+        """FITS HDU of the image to measure (i.e. after sky subtraction)."""
         return fits.open(self.filename)[self.extension]
 
     @property
     def data(self):
-        """FITS HDU object corresponding to the measured image (after sky subtraction)."""
+        """FITS data of the image to measure (i.e. after sky subtraction)."""
         return self.hdu.data
 
     @cached_property
@@ -252,13 +261,14 @@ class VphasFrame(object):
         elif expno < self.header['ESO TPL NEXP']:
             offset = 'b'
         else:
-            offset ='c'
-        return '{0}{1}'.format(field_number, offset)
+            offset = 'c'
+        return '{}{}'.format(field_number, offset)
 
     @cached_property
     def name(self):
         """VPHAS name of the frame, e.g. '0001a-r-8'."""
-        return '{0}-{1}-{2}'.format(self.fieldname, self.band, self.orig_extension)
+        return '{}-{}-{}'.format(self.fieldname, self.band,
+                                 self.orig_extension)
 
     @cached_property
     def band(self):
@@ -285,37 +295,38 @@ class VphasFrame(object):
     @cached_property
     def airmass(self):
         """Airmass."""
-        return (self.header['ESO TEL AIRM START']
-                + self.header['ESO TEL AIRM END']) / 2.
+        return (self.header['ESO TEL AIRM START'] +
+                self.header['ESO TEL AIRM END']) / 2.
 
     @cached_property
     def zeropoint(self):
         """Magnitude zeropoint corrected for airmass."""
         # assuming default extinction
-        return self.hdu.header['MAGZPT'] - (self.airmass - 1.) * self.hdu.header['EXTINCT']
+        return (self.header['MAGZPT'] -
+                (self.airmass - 1.) * self.header['EXTINCT'])
 
     @cached_property
     def gain(self):
         """Detector gain [electrons / adu]."""
         # WARNING: OmegaCam headers contain gain in "ADU per electron",
         # we need to convert this to "electron per ADU" for DAOPHOT.
-        return 1. / self.hdu.header['ESO DET OUT1 GAIN']
+        return 1. / self.header['ESO DET OUT1 GAIN']
 
     @cached_property
     def readnoise(self):
         """Detector read noise in electrons.
 
         We do not simply return the 'HIERARCH ESO DET OUT1 RON' keyword
-        because it appears to contain "0" at all times.
-        In reality the noise is documented to be approx 2 ADU,
-        i.e. ~5 electrons, cf http://www.eso.org/observing/dfo/quality/OMEGACAM/qc/readnoise_QC1.html
+        because it appears to contain "0" at all times.  In reality the noise
+        is documented to be approx 2 ADU, i.e. ~5 electrons, cf
+        http://www.eso.org/observing/dfo/quality/OMEGACAM/qc/readnoise_QC1.html
         """
         return 2. * self.gain  # [electrons] i.e. [photons]
 
     @cached_property
     def datamin(self):
         """Returns the minimum good pixel value. [adu]
-        
+
         We tolerate up to 5-sigma below the average sky level.
         """
         datamin = self.sky - 5 * self.sky_sigma
@@ -329,22 +340,28 @@ class VphasFrame(object):
     def datamax(self):
         """Returns the maximum good (non-saturated) pixel value. [adu]
 
-        The VST/OmegaCAM manual (VST-MAN-OCM-23100-3110-2_7_1) suggests that the
-        detector is linear (within ~1%) up to the saturation level.
-        The saturation level is not exactly 2^16 = 65536 due to bias subtraction etc,
-        so we conservatively ignore pixel values over 55000 ADU.
+        The VST/OmegaCAM manual (VST-MAN-OCM-23100-3110-2_7_1) suggests that
+        the detector is linear (within ~1%) up to the saturation level.
+        The saturation level is not exactly 2^16 = 65536 due to bias
+        subtraction etc, so we conservatively ignore pixel values over
+        55000 ADU.
 
         It is VERY important to be conservative when choosing PSF template
         stars, because the cores of saturated stars should be avoided at all
-        cost. Charge bleeding may cause pixels well below the nominal saturation
-        level to give an unrepresentative view of the PSF.
+        cost. Charge bleeding may cause pixels well below the nominal
+        saturation level to give an unrepresentative view of the PSF.
         """
         return 55000
 
     @cached_property
     def seeing(self):
         """Estimate of the seeing full-width at half-maximum."""
-        return self.hdu.header['SEEING']  # pixels
+        seeing = self.header['SEEING']  # pixels
+        # Occasionally CASU's estimate of the seeing goes beserk in the u-band;
+        # so if the value looks crazy, we assume 1 arcsec (i.e. 4.7 px).
+        if seeing < 2: # ~0.426 arcsec
+            seeing = 4.7  # assume median seeing
+        return seeing
 
     @property
     def psf_fwhm(self):
@@ -353,7 +370,7 @@ class VphasFrame(object):
             return self._cache['psf_fwhm']
         except KeyError:
             self._estimate_psf()
-            return self._cache['psf_fwhm'] 
+            return self._cache['psf_fwhm']
 
     @property
     def psf_ratio(self):
@@ -369,7 +386,7 @@ class VphasFrame(object):
             return self._cache['psf_theta']
         except KeyError:
             self._estimate_psf()
-            return self._cache['psf_theta'] 
+            return self._cache['psf_theta']
 
     def world2pix(self, ra, dec, origin=1):
         """Shorthand to convert equatorial(ra, dec) into pixel(x, y) coords.
@@ -377,14 +394,14 @@ class VphasFrame(object):
         Use origin=1 if the x/y coordinates are to be used as input
         for IRAF/DAOPHOT, use origin=0 for astropy.
         """
-        return astropy.wcs.WCS(self.hdu.header).wcs_world2pix(ra, dec, origin)
+        return astropy.wcs.WCS(self.header).wcs_world2pix(ra, dec, origin)
 
     def pix2world(self, x, y, origin=1):
         """Shorthand to convert pixel(x,y) into equatorial(ra,dec) coordinates.
 
         Use origin=1 if x/y positions were produced by IRAF/DAOPHOT,
         0 if they were produced by astropy."""
-        return astropy.wcs.WCS(self.hdu.header).wcs_pix2world(x, y, origin)
+        return astropy.wcs.WCS(self.header).wcs_pix2world(x, y, origin)
 
     def _estimate_psf(self, threshold=100.):
         """Fits a 2D Gaussian PSF to the stars in the images.
@@ -399,25 +416,36 @@ class VphasFrame(object):
             Minimum detection significance in units sigma (noise above the
             background) for objects to be considered for PSF fitting.
         """
-        sources = photutils.daofind(self.hdu.data - self.sky,
-                                    fwhm = self.seeing,
-                                    threshold = threshold * self.sky_sigma)
-        log.debug("Found {0} sources for Gaussian PSF fitting.".format(len(sources)))
+        sources = photutils.daofind(self.data - self.sky,
+                                    fwhm=self.seeing,
+                                    threshold=threshold * self.sky_sigma)
+        log.debug("Found {} sources for PSF estimation.".format(len(sources)))
         positions = [[s['xcentroid'], s['ycentroid']] for s in sources]
-        prf_discrete = photutils.psf.create_prf(self.hdu.data - self.sky,
-                                                positions,
-                                                7,
-                                                mode='median') #, fluxes=fluxes_catalog, mask=np.logical_not(mask), subsampling=5)
-        
+        prf_discrete = photutils.psf.create_prf(self.data - self.sky,
+                                                positions, 7, mode='median')
+
         myfit = photutils.morphology.fit_2dgaussian(prf_discrete._prf_array[0][0])
-        fwhm = myfit.x_stddev * (2.0 * np.sqrt(2.0 * np.log(2.0)))
-        ratio = myfit.y_stddev.value / myfit.x_stddev.value  # Need value to keep it from being an array
-        if ratio > 1:  # Daophot will fail if the ratio is larger than 1 (i.e. it wants tthe ratio of minor to major axis)
+        # Hack: ensure we are compatible with both photutils 0.1 and later
+        if photutils.__version__ == '0.1':
+            x_stddev = myfit.x_stddev.value # .value to have a float not array
+            y_stddev = myfit.y_stddev.value
+            theta = myfit.theta.value
+        else:  # later versions have the "_1" suffix for some reason
+            x_stddev = myfit.x_stddev_1.value
+            y_stddev = myfit.y_stddev_1.value
+            theta = myfit.theta_1.value
+        # Compute full-width-at-half-maximum and ratio
+        fwhm = x_stddev * (2.0 * np.sqrt(2.0 * np.log(2.0)))
+        ratio = y_stddev / x_stddev
+        # Daophot will fail if the ratio is larger than 1,
+        # i.e. it wants the ratio of minor to major axis.
+        if ratio > 1:
             ratio = 1. / ratio
-        theta = myfit.theta.value
-        # pyraf will complain over a negative theta
+        # pyraf will complain if theta is negative or too large
         if theta < 0:
             theta += 180
+        elif theta > 180:
+            theta -= 180
         log.debug('{0} PSF FWHM = {1:.1f}px; ratio = {2:.1f}; theta = {3:.1f}'.format(self.band, fwhm, ratio, theta))
         self._cache['psf_fwhm'] = fwhm
         self._cache['psf_ratio'] = ratio
@@ -465,14 +493,14 @@ class VphasFrame(object):
         """
         dp = self.daophot(threshold=threshold, **kwargs)
         sources = dp.do_psf_photometry()
-        chi_max = float(self.cfg['sourcelist'].get('chi_max', 5.))
-        sharp_max = float(self.cfg['sourcelist'].get('sharp_max', 1.))
+        chi_max = float(self.cfg['sourcelist'].get('chi_max', 2.))
+        sharp_max = float(self.cfg['sourcelist'].get('sharp_max', 0.9))
         mask_accept = (
-                        (sources['SNR'] > threshold)
-                        & (np.abs(sources['SHARPNESS']) < sharp_max)
-                        & (sources['CHI'] < chi_max)
-                        & (sources['PIER_ALLSTAR'] == 0)
-                        & (sources['PIER_PHOT'] == 0)
+                        (sources['SNR'] > threshold) &
+                        (np.abs(sources['SHARPNESS']) < sharp_max) &
+                        (sources['CHI'] < chi_max) &
+                        (sources['PIER_ALLSTAR'] == 0) &
+                        (sources['PIER_PHOT'] == 0)
                         )
         sources.meta['band'] = self.band
         tbl = sources[mask_accept]
@@ -544,20 +572,22 @@ class VphasFrame(object):
         crd = SkyCoord(ra*u.deg, dec*u.deg)
         idx, nn_dist, dist3d = crd.match_to_catalog_sky(crd, nthneighbor=2)
         tbl['nndist_' + self.band] = nn_dist.to(u.arcsec)
-        #tbl.add_columns([ra_col, dec_col, nndist_col])
         # Add further columns
         # Shift of the source centroid during PSF fitting [arcsec]
         tbl['pixelShift_' + self.band] = np.hypot(tbl['XCENTER_ALLSTAR'] - tbl['XINIT'],
-                                          tbl['YCENTER_ALLSTAR'] - tbl['YINIT'])
+                                                  tbl['YCENTER_ALLSTAR'] - tbl['YINIT'])
         id_prefix = (
                      os.path.basename(self.orig_filename)
-                        .replace('o', '')
-                        .replace('_', '-')
-                        .replace('.fit', '')
+                     .replace('o', '')
+                     .replace('_', '-')
+                     .replace('.fit', '')
                     )
-        tbl['detectionID_' + self.band] = ['{0}-{1}-{2}'.format(id_prefix, self.orig_extension, idx) for idx in tbl['ID']]
-        tbl['mjd_'+self.band] = np.repeat(self.primary_header['MJD-OBS'], len(tbl))
-        tbl['psffwhm_'+self.band] = np.repeat(VPHAS_PIXEL_SCALE * self.psf_fwhm, len(tbl))
+        tbl['detectionID_' + self.band] = ['{}-{}-{}'.format(id_prefix, self.orig_extension, idx)
+                                           for idx in tbl['ID']]
+        tbl['mjd_'+self.band] = np.repeat(self.primary_header['MJD-OBS'],
+                                          len(tbl))
+        tbl['psffwhm_'+self.band] = np.repeat(VPHAS_PIXEL_SCALE * self.psf_fwhm,
+                                              len(tbl))
         tbl['airmass_'+self.band] = np.repeat(self.airmass, len(tbl))
         # Rename existing columns from DAOPHOT to our conventions
         tbl['MAG_ALLSTAR'].name = self.band
@@ -566,7 +596,7 @@ class VphasFrame(object):
         tbl['CHI'].name = 'chi_' + self.band
         tbl['SHARPNESS'].name = 'sharpness_' + self.band
         tbl['PIER_ALLSTAR'].name = 'pier_' + self.band
-        tbl['PERROR_ALLSTAR'].name = 'perror_' + self.band
+        tbl['PERROR_ALLSTAR'].name = 'error_' + self.band
         tbl['MAG_PHOT'].name = 'aperMag_' + self.band
         tbl['MERR_PHOT'].name = 'aperMagErr_' + self.band
         tbl['SNR'].name = 'snr_' + self.band
@@ -581,37 +611,54 @@ class VphasFrame(object):
                 warnings.filterwarnings("ignore",
                                         message='Attribute `keywords`(.*)')
                 tbl_fn = os.path.join(self.workdir, 'photometry.fits')
-                log.debug('{0}: writing photometry to {1}'.format(self.band, tbl_fn))
-                tbl.write(tbl_fn)
+                log.debug('{}: writing {}'.format(self.band, tbl_fn))
+                tbl.write(tbl_fn, overwrite=True)
 
-        # Mask untrustworthy magnitude estimates at low or negative SNR
-        mask_too_faint = (
-                             (tbl['snr_' + self.band].filled(-1) < 3)
-                             | (tbl[self.band].filled(999) > tbl['magLim_' + self.band])
+        # Flag untrustworthy magnitude estimates at low or negative SNR
+        flag_too_faint = (
+                    (tbl['snr_' + self.band].filled(-1) < 3) |
+                    (tbl[self.band].filled(999) > tbl['magLim_' + self.band])
                           )
-        for prefix in ['', 'err_', 'aperMag_', 'aperMagErr_']:
-            tbl[prefix + self.band].mask[mask_too_faint] = True
-
-        # Mask PSF magnitudes if not fitted without error, the position should not
-        # have shifted, and the CHI score must be decent.
-        chi_max = float(self.cfg['photometry'].get('chi_max', 3.))
+        # Flag when whe position fit has shifted too far away
         shift_max = float(self.cfg['photometry'].get('shift_max', 1.))
-        mask_bad_fit = (
-                        np.isnan(tbl[self.band].filled(np.nan))
-                        | (tbl['pier_' + self.band].filled(0) != 0)
-                        | (tbl['chi_' + self.band].filled(999) > chi_max)
-                        | (tbl['pixelShift_' + self.band].filled(999) > shift_max)
-                    )
-        for prefix in ['ra_', 'dec_', '', 'err_']:
-            tbl[prefix + self.band].mask[mask_bad_fit] = True 
-            
+        flag_shifted = tbl['pixelShift_' + self.band].filled(999) > shift_max
+        # Flag when the source is off the image
+        flag_off_image = tbl['error_' + self.band].filled('') == 'Off_image'
+        # Flag bad fits
+        chi_max = float(self.cfg['photometry'].get('chi_max', 3.))
+        flag_bad_fit = (
+                        np.isnan(tbl[self.band].filled(np.nan)) |
+                        (tbl['pier_' + self.band].filled(0) != 0) |
+                        (tbl['chi_' + self.band].filled(999) > chi_max)
+                       )
+
+        # Now use the above flags to mask out column values
+        # First mask out PSF photometry for faint/shifted/bad fits
+        mask_psfphot = flag_too_faint | flag_shifted | flag_bad_fit
+        for prefix in ['', 'err_']:
+            tbl[prefix + self.band].mask[mask_psfphot] = True
+        # Mask out aperture photometry for faint/shifted fits
+        mask_aperphot = flag_too_faint | flag_shifted
+        for prefix in ['aperMag_', 'aperMagErr_']:
+            tbl[prefix + self.band].mask[mask_aperphot] = True
+        # Mask out all properties for shifted or off-image fits
+        mask_all = flag_shifted | flag_off_image
+        for prefix in ['ra_', 'dec_', 'chi_', 'sharpness_', 'sky_',
+                       'snr_', 'magLim_']:
+            tbl[prefix + self.band].mask[mask_all] = True
+
+        # Make the error messages more informative
+        tbl['error_' + self.band][flag_shifted | flag_bad_fit] = 'Bad_fit'
+        tbl['error_' + self.band][flag_too_faint] = 'Too_faint'
+        tbl['error_' + self.band][flag_off_image] = 'Off_image'
+
         # The "clean" quality flag helps the user select good sources
         tbl['clean_' + self.band] = (
-                                    ~tbl[self.band].mask
-                                    & (tbl['err_' + self.band].filled(999) < 0.1)
-                                    & (tbl['snr_' + self.band].filled(-999) > 10)
-                                    & (tbl['chi_' + self.band].filled(999) < 1.5)
-                                 )
+                                ~tbl[self.band].mask &
+                                (tbl['err_' + self.band].filled(999) < 0.1) &
+                                (tbl['snr_' + self.band].filled(-999) > 10) &
+                                (tbl['chi_' + self.band].filled(999) < 1.5)
+                                )
 
         # Finally, specify the columns to keep and their order
         columns = ['detectionID_' + self.band,
@@ -624,8 +671,7 @@ class VphasFrame(object):
                    'chi_' + self.band,
                    'sharpness_' + self.band,
                    'sky_' + self.band,
-                   'pier_' + self.band,
-                   'perror_' + self.band,
+                   'error_' + self.band,
                    'aperMag_' + self.band,
                    'aperMagErr_' + self.band,
                    'snr_' + self.band,
@@ -636,9 +682,14 @@ class VphasFrame(object):
                    'nndist_' + self.band,
                    'pixelShift_' + self.band,
                    'clean_' + self.band]
+
+        # Make sure all floating point columns have NaN as the fill value
+        for colname in columns:
+            if tbl[colname].dtype.kind == 'f':
+                tbl[colname].fill_value = np.nan
+
         return tbl[columns]
 
-    @timed
     def plot_images(self, image_fn, bg_fn, sampling=1):
         """Plots quicklook bitmaps of the data and the background estimate.
 
@@ -666,7 +717,6 @@ class VphasFrame(object):
                     transform(self.bg_hdu.data[::sampling, ::sampling]),
                     **imgstyle)
 
-    @timed
     def plot_subtracted_images(self, nosky_fn, nostars_fn, psf_fn, sampling=1):
         """Saves quicklook bitmaps of the PSF photometry results.
 
@@ -722,12 +772,12 @@ class VphasOffsetCatalogue(object):
         field number, followed by 'a' (first offset), 'b' (second offset),
         or 'c' (third offset used in the g and H-alpha bands only.)
 
-    config : str
-        Filename of the ".ini" file that contains the configuration parameters.
-        By default, the catalogue.ini file that comes with the package will be
-        used.
+    configfile : str
+        Filename of a *.ini file that contains the configuration parameters.
+        If `None`, then the default catalogue.ini file that comes with the
+        package will be used.
     """
-    def __init__(self, name, config=DEFAULT_CONFIG, **kwargs):
+    def __init__(self, name, configfile=None, **kwargs):
         # Offset name must be a string of the form "0001a".
         if len(name) != 5 or not name.endswith(('a', 'b', 'c')):
             raise ValueError('"{0}" is an illegal offset name. '
@@ -736,9 +786,11 @@ class VphasOffsetCatalogue(object):
         self.name = name
         self.kwargs = kwargs
         # Read the configuration
-        self.config = config
+        if configfile is None:
+            configfile = DEFAULT_CONFIGFILE
+        self.configfile = configfile
         self.cfg = configparser.ConfigParser()
-        self.cfg.read(config)
+        self.cfg.read(configfile)
         # Make sure the root working directory exists
         try:
             os.mkdir(self.cfg['vphas']['workdir'])
@@ -754,17 +806,22 @@ class VphasOffsetCatalogue(object):
             self.pool = multiprocessing.Pool(processes=6)
             self.cpumap = self.pool.imap
         else:
-            self.cpumap = map #itertools  # Simple sequential processing
+            self.cpumap = map  # Simple sequential processing
 
-    def __del__(self):
-        """Destructor."""
-        # shutil.rmtree(self.workdir)
+    def clean(self):
+        """Removes the working directory and its contents."""
+        if self.cfg['catalogue'].getboolean('clean', True):
+            shutil.rmtree(self.workdir, ignore_errors=True)
         # Make sure to get rid of any multiprocessing-forked processes;
-        # they might be eating up a lot of memory!
+        # they might be eating up memory!
         try:
             self.pool.terminate()
         except AttributeError:
-            pass  # only applies to a multiprocessing.pool.Pool object
+            pass  # there may not have been a multiprocessing Pool
+
+    def __del__(self):
+        """Destructor."""
+        self.clean()
 
     @property
     def save_diagnostics(self):
@@ -805,7 +862,7 @@ class VphasOffsetCatalogue(object):
             # Compute the catalogue for each ccd
             framecats = []
             for ccd in ccdlist:
-                framecats.append(self.create_ccd_catalogue(images=images, 
+                framecats.append(self.create_ccd_catalogue(images=images,
                                                            ccd=ccd))
             catalogue = table.vstack(framecats, metadata_conflicts='silent')
             if self.save_diagnostics:
@@ -870,7 +927,7 @@ class VphasOffsetCatalogue(object):
             fig.savefig(output_fn, dpi=120, facecolor='black')
             pl.close(fig)
 
-    @timed
+    @timeout(1800)  # This should never take more than an hour
     def create_ccd_catalogue(self, images, ccd=1):
         """Create a multi-band catalogue for the area covered by a single ccd.
 
@@ -891,9 +948,9 @@ class VphasOffsetCatalogue(object):
         # Setup the working directory to store temporary files
         ccd_workdir = os.path.join(self.workdir, 'ccd-{0}'.format(ccd))
         os.mkdir(ccd_workdir)
-        log.info('Starting to build catalogue for {0} ccd {1}, '
-                 'workdir: {2}'.format(self.name, ccd, ccd_workdir))
-
+        log.info('Started cataloguing {}[{}].'.format(self.name, ccd))
+        log.info('Working directory: {}'.format(ccd_workdir))
+        log.info('Now preparing the frames.')
         jobs = []
         for fn in images.values():
             params = {'filename': fn,
@@ -906,6 +963,7 @@ class VphasOffsetCatalogue(object):
         for frame in self.cpumap(frame_initialisation_task, jobs):
             frames[frame.band] = frame
         # Create a merged source table
+        log.info('Now building a master list of sources.')
         sourcetbl, psf_table = self.run_source_detection(frames)
         if self.save_diagnostics:
             with warnings.catch_warnings():
@@ -915,8 +973,9 @@ class VphasOffsetCatalogue(object):
                 sourcetbl.write(os.path.join(ccd_workdir, 'sourcelist.fits'))
                 psf_table.write(os.path.join(ccd_workdir, 'psflist.fits'))
         # Carry out the PSF photometry using the source table created above
+        log.info('Now performing the photometry.')
         if 'u' in frames:
-            bandorder = ['u', 'g', 'r', 'i', 'ha', 'r2']  # sorted by lambda
+            bandorder = ['u', 'g', 'r', 'i', 'ha', 'r2']
         else:  # sometimes the blue concat is missing
             bandorder = ['r', 'i', 'ha']
         jobs = []
@@ -962,15 +1021,26 @@ class VphasOffsetCatalogue(object):
         if 'u' in frames:
             merged['u_g'] = merged['u'] - merged['g']
             merged['g_r'] = merged['g'] - merged['r']
-            merged['clean'] = (merged['clean_u'].filled(False) &
-                               merged['clean_g'].filled(False) &
+            merged['clean'] = (merged['clean_g'].filled(False) &
                                merged['clean_r'].filled(False) &
                                merged['clean_i'].filled(False) &
                                merged['clean_ha'].filled(False))
+            mask_nodata = (merged['u'].mask & merged['aperMag_u'].mask &
+                           merged['g'].mask & merged['aperMag_g'].mask &
+                           merged['r'].mask & merged['aperMag_r'].mask &
+                           merged['i'].mask & merged['aperMag_i'].mask &
+                           merged['ha'].mask & merged['aperMag_ha'].mask &
+                           merged['r2'].mask & merged['aperMag_r2'].mask)
         else:
             merged['clean'] = (merged['clean_r'].filled(False) &
                                merged['clean_i'].filled(False) &
                                merged['clean_ha'].filled(False))
+            mask_nodata = (merged['r'].mask & merged['aperMag_r'].mask &
+                           merged['i'].mask & merged['aperMag_i'].mask &
+                           merged['ha'].mask & merged['aperMag_ha'].mask)
+        # Finally, remove entries for which all magnitude measurements have
+        # been masked, because they are essentially useless.
+        merged = merged[~mask_nodata]
         # As well as returning the catalogue as a `Table`, write it to disk
         if self.save_diagnostics:
             with warnings.catch_warnings():
@@ -1175,7 +1245,11 @@ def source_detection_task(par):
 
 
 def photometry_task(par):
-    """Returns a table with the photometry for a list of sources.
+    """Perform photometry on a single exposure (i.e. a single band).
+
+    The routine expects the coordinates of the to-be-photometered stars to be
+    known, along with the coordinates of the stars to be used for fitting
+    the PSF template.
 
     Parameters
     ----------
@@ -1190,7 +1264,7 @@ def photometry_task(par):
     Returns
     -------
     tbl : `astropy.table.Table` object
-        Photometry.
+        Table detailing the measured photometry (DAOPHOT PSF & aperture phot).
     """
     conf = par['cfg']['photometry']
     tbl = par['frame'].photometry(
@@ -1217,3 +1291,57 @@ def photometry_task(par):
         par['frame'].plot_subtracted_images(nostars_fn=fn[0], nosky_fn=fn[1],
                                             psf_fn=fn[2])
     return tbl
+
+
+def vphas_offset_catalogue(offset, ccdlist=range(1, 33),
+                           configfile=None, overwrite=True):
+    """Make a catalogue."""
+    for ccd in ccdlist:
+        try:
+            vpc = VphasOffsetCatalogue(offset, configfile=configfile)
+            cat = vpc.create_catalogue(ccdlist=[ccd])
+            out_fn = os.path.join(vpc.cfg['catalogue']['destdir'],
+                                  '{0}-{1}-cat.fits'.format(vpc.name, ccd))
+            log.info('Writing {0}'.format(out_fn))
+            with warnings.catch_warnings():
+                # Attribute `keywords` cannot be written to FITS files
+                warnings.filterwarnings("ignore",
+                                        message='Attribute `keywords`(.*)')
+                cat.write(out_fn, overwrite=overwrite)
+            vpc.clean()
+        except Exception as e:
+            log.error('{}[{}]: {}'.format(offset, ccd, e))
+        finally:
+            vpc.clean()
+
+
+def vphas_offset_catalogue_main(args=None):
+    """Command-line interface to create an offset catalogue."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Create a multi-band catalogue for a single VPHAS offset '
+                    'pointing.')
+    parser.add_argument('-c', '--config', metavar='configfile',
+                        type=str, default=None,
+                        help='Configuration file.')
+    parser.add_argument('-e', '--extension', metavar='CCD',
+                        type=int, default=None,
+                        help='CCD extension number.')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Turn on debug output.')
+    parser.add_argument('offset', nargs='+',
+                        help='Offset name, e.g. 0001a or 0001b.')
+    args = parser.parse_args(args)
+
+    if args.verbose:
+        log.setLevel('DEBUG')
+    else:
+        log.setLevel('INFO')
+
+    for offset in args.offset:
+        if args.extension is not None:
+            ccdlist = [args.extension]
+        else:
+            ccdlist = range(1, 33)
+        vphas_offset_catalogue(offset, ccdlist=ccdlist, configfile=args.config)

@@ -3,11 +3,41 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 import time
+import signal
 import functools
 import numpy as np
 
 from astropy import table
 from astropy import log
+
+
+class TimeOutException(Exception):
+    """
+    Raised when a timeout happens,
+    see http://stackoverflow.com/questions/8616630/time-out-decorator-on-a-multprocessing-function
+    """
+
+def timeout(timeout):
+    """
+    Return a decorator that raises a TimeOutException exception
+    after timeout seconds, if the decorated function did not return.
+    """
+    def decorate(f):
+
+        def handler(signum, frame):
+            raise TimeOutException('{} timed out after {} seconds'.format(f.__name__, timeout))
+
+        def new_f(*args, **kwargs):
+            old_handler = signal.signal(signal.SIGALRM, handler)
+            signal.alarm(timeout)
+            result = f(*args, **kwargs)
+            signal.signal(signal.SIGALRM, old_handler)  # Old signal handler is restored
+            signal.alarm(0)  # Alarm removed
+            return result
+
+        return new_f
+
+    return decorate
 
 
 def cached_property(method):

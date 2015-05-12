@@ -51,16 +51,25 @@ class Daophot(object):
 
     The speed of psf and allstar tasks are mostly affected by the psfrad
     and psfnmax parameters.
+
+    Parameters
+    ----------
+    image_path : str
+        Path to the FITS file to be analyzed by DAOPHOT.
+
+    workdir : str
+        Path to a directory where we may write temporary files. Note that,
+        at present, this module does NOT clean up temporary files after itself,
+        that is left to the caller (for the sake of enabling temporary files
+        to be inspected for debugging).
+
+    (iraf parameters) : see _setup_iraf for a full list of supported settings.
     """
     def __init__(self, image_path, workdir='/tmp', **kwargs):
         self.workdir = tempfile.mkdtemp(prefix='daophot-', dir=workdir)
         self._path_cache = {}
         self._path_cache['image_path'] = image_path
         self._setup_iraf(**kwargs)
-
-    def __del__(self):
-        """Destructor; cleans up the temporary directory."""
-        pass  # shutil.rmtree(self.workdir)
 
     def _setup_iraf(self, datamin=0, datamax=60000, epadu=1., fitrad_fwhm=1.,
                     fitsky='no', function='moffat25', fwhmpsf=3., itime=10.,
@@ -188,6 +197,8 @@ class Daophot(object):
             iraf.unlearn(module)
         # Avoid the "Out of space in image header" exception
         iraf.set(min_lenuserarea=640000)
+        # Allow overwriting files
+        iraf.set(clobber="yes")
         # Set data-dependent IRAF/DAOPHOT configuration parameters
         iraf.datapars.fwhmpsf = fwhmpsf   # [pixels]
         iraf.datapars.sigma = sigma       # sigma(background) [ADU]
@@ -325,9 +336,7 @@ class Daophot(object):
                               pstfile=output_path,
                               verify='no',
                               interactive='no',
-                              verbose='yes',
-                              Stdout=str(os.path.join(self.workdir,
-                                                      'log-pstselect.txt')))
+                              verbose='no')
         iraf.daophot.pstselect(**pstselect_args)
         # Prune the selected stars using sigma-clipping on the sky count
         if prune_outliers:
@@ -372,7 +381,6 @@ class Daophot(object):
                         verbose='yes',
                         Stdout=str(path_psf_log))
         iraf.daophot.psf(**psf_args)
-
         # It is possible for iraf.daophot.psf() to fail to converge.
         # In this case, we re-try with more easy-to-fit settings.
         success, norm_scatter = psf_success(path_psf_log, norm_scatter_limit)
@@ -406,10 +414,12 @@ class Daophot(object):
                     limit = norm_scatter_limit
                 success, norm_scatter = psf_success(path_psf_log,
                                                     norm_scatter_limit=limit)
-                log.warning('daophot.psf: norm_scatter on attempt '
-                            '#{0} = {1:.3f} (maxnpsf={2})'.format(attempt_no+2,
-                                                                  norm_scatter,
-                                                                  maxnpsf))
+                log.warning('daophot.psf: norm_scatter on attempt #{0} '
+                            '= {1:.3f} (maxnpsf={2})'
+                            ' [{3}]'.format(attempt_no+2,
+                                            norm_scatter,
+                                            maxnpsf,
+                                            self._path_cache['image_path']))
                 if success:
                     break
             # Restore the original config
@@ -562,7 +572,7 @@ def pstselect_prune(pstselect_output_path, new_path):
         bad_mask = sigma_clip(tbl['MSKY'].data, sig=sigma, iters=None).mask
         if bad_mask.sum() < 0.3*len(tbl):  # stop if <30% rejected
             break
-    log.info('Rejected {0} stars for PSF fitting'.format(bad_mask.sum()))
+    log.info('Rejected {} stars for PSF fitting {}'.format(bad_mask.sum(), new_path))
     # Now write the new file without the pruned objects to disk
     fh = open(new_path, 'w')
     fh.write("#N ID    XCENTER   YCENTER   MAG         MSKY\n"
