@@ -441,9 +441,11 @@ class VphasFrame(object):
         # i.e. it wants the ratio of minor to major axis.
         if ratio > 1:
             ratio = 1. / ratio
-        # pyraf will complain if theta is negative
+        # pyraf will complain if theta is negative or too large
         if theta < 0:
             theta += 180
+        elif theta > 180:
+            theta -= 180
         log.debug('{0} PSF FWHM = {1:.1f}px; ratio = {2:.1f}; theta = {3:.1f}'.format(self.band, fwhm, ratio, theta))
         self._cache['psf_fwhm'] = fwhm
         self._cache['psf_ratio'] = ratio
