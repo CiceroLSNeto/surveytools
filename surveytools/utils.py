@@ -146,9 +146,6 @@ def equ2gal(ra, dec):
     return (GL, GT)
 
 
-class ColumnMergeError(ValueError):
-    pass
-
 def _get_list_of_columns(columns):
     """
     Check that columns is a Column or sequence of Columns.  Returns the
@@ -175,10 +172,9 @@ def coalesce(columns):
     -------
     column : coalesced result
     """
-    # todo: test if columns have right type
-    # todo: test if columns have same size
     columns = _get_list_of_columns(columns)  # validates input
-    
+    # todo: need to verify that the columns have the same size
+
     result = columns[0].copy()
     for col in columns[1:]:
         mask_coalesce = result.mask & ~col.mask
