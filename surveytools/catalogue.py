@@ -88,7 +88,7 @@ class VphasFrame(object):
     extension : int (optional)
         Extension of the image in the FITS file. (default: 0)
     """
-    def __init__(self, filename, extension=0, cfg=None, workdir=None):
+    def __init__(self, filename, extension=1, cfg=None, workdir=None):
         # Setup configuration
         if cfg is None:
             self.cfg = configparser.ConfigParser()
@@ -302,15 +302,15 @@ class VphasFrame(object):
     def zeropoint(self):
         """Magnitude zeropoint corrected for airmass."""
         # assuming default extinction
-        return (self.hdu.header['MAGZPT'] -
-                (self.airmass - 1.) * self.hdu.header['EXTINCT'])
+        return (self.header['MAGZPT'] -
+                (self.airmass - 1.) * self.header['EXTINCT'])
 
     @cached_property
     def gain(self):
         """Detector gain [electrons / adu]."""
         # WARNING: OmegaCam headers contain gain in "ADU per electron",
         # we need to convert this to "electron per ADU" for DAOPHOT.
-        return 1. / self.hdu.header['ESO DET OUT1 GAIN']
+        return 1. / self.header['ESO DET OUT1 GAIN']
 
     @cached_property
     def readnoise(self):
@@ -356,7 +356,12 @@ class VphasFrame(object):
     @cached_property
     def seeing(self):
         """Estimate of the seeing full-width at half-maximum."""
-        return self.hdu.header['SEEING']  # pixels
+        seeing = self.header['SEEING']  # pixels
+        # Occasionally CASU's estimate of the seeing goes beserk in the u-band;
+        # so if the value looks crazy, we assume 1 arcsec (i.e. 4.7 px).
+        if seeing < 2: # ~0.426 arcsec
+            seeing = 4.7  # assume median seeing
+        return seeing
 
     @property
     def psf_fwhm(self):
@@ -389,14 +394,14 @@ class VphasFrame(object):
         Use origin=1 if the x/y coordinates are to be used as input
         for IRAF/DAOPHOT, use origin=0 for astropy.
         """
-        return astropy.wcs.WCS(self.hdu.header).wcs_world2pix(ra, dec, origin)
+        return astropy.wcs.WCS(self.header).wcs_world2pix(ra, dec, origin)
 
     def pix2world(self, x, y, origin=1):
         """Shorthand to convert pixel(x,y) into equatorial(ra,dec) coordinates.
 
         Use origin=1 if x/y positions were produced by IRAF/DAOPHOT,
         0 if they were produced by astropy."""
-        return astropy.wcs.WCS(self.hdu.header).wcs_pix2world(x, y, origin)
+        return astropy.wcs.WCS(self.header).wcs_pix2world(x, y, origin)
 
     def _estimate_psf(self, threshold=100.):
         """Fits a 2D Gaussian PSF to the stars in the images.
@@ -411,23 +416,32 @@ class VphasFrame(object):
             Minimum detection significance in units sigma (noise above the
             background) for objects to be considered for PSF fitting.
         """
-        sources = photutils.daofind(self.hdu.data - self.sky,
+        sources = photutils.daofind(self.data - self.sky,
                                     fwhm=self.seeing,
                                     threshold=threshold * self.sky_sigma)
         log.debug("Found {} sources for PSF estimation.".format(len(sources)))
         positions = [[s['xcentroid'], s['ycentroid']] for s in sources]
-        prf_discrete = photutils.psf.create_prf(self.hdu.data - self.sky,
+        prf_discrete = photutils.psf.create_prf(self.data - self.sky,
                                                 positions, 7, mode='median')
 
         myfit = photutils.morphology.fit_2dgaussian(prf_discrete._prf_array[0][0])
-        fwhm = myfit.x_stddev * (2.0 * np.sqrt(2.0 * np.log(2.0)))
-        ratio = myfit.y_stddev.value / myfit.x_stddev.value  # Need value to keep it from being an array
-        # Daophot will fail if the ratio is larger than 1
-        # (i.e. it wants the ratio of minor to major axis)
+        # Hack: ensure we are compatible with both photutils 0.1 and later
+        if photutils.__version__ == '0.1':
+            x_stddev = myfit.x_stddev.value # .value to have a float not array
+            y_stddev = myfit.y_stddev.value
+            theta = myfit.theta.value
+        else:  # later versions have the "_1" suffix for some reason
+            x_stddev = myfit.x_stddev_1.value
+            y_stddev = myfit.y_stddev_1.value
+            theta = myfit.theta_1.value
+        # Compute full-width-at-half-maximum and ratio
+        fwhm = x_stddev * (2.0 * np.sqrt(2.0 * np.log(2.0)))
+        ratio = y_stddev / x_stddev
+        # Daophot will fail if the ratio is larger than 1,
+        # i.e. it wants the ratio of minor to major axis.
         if ratio > 1:
             ratio = 1. / ratio
-        theta = myfit.theta.value
-        # pyraf will complain over a negative theta
+        # pyraf will complain if theta is negative
         if theta < 0:
             theta += 180
         log.debug('{0} PSF FWHM = {1:.1f}px; ratio = {2:.1f}; theta = {3:.1f}'.format(self.band, fwhm, ratio, theta))
@@ -1286,7 +1300,11 @@ def vphas_offset_catalogue(offset, ccdlist=range(1, 33),
             out_fn = os.path.join(vpc.cfg['catalogue']['destdir'],
                                   '{0}-{1}-cat.fits'.format(vpc.name, ccd))
             log.info('Writing {0}'.format(out_fn))
-            cat.write(out_fn, overwrite=overwrite)
+            with warnings.catch_warnings():
+                # Attribute `keywords` cannot be written to FITS files
+                warnings.filterwarnings("ignore",
+                                        message='Attribute `keywords`(.*)')
+                cat.write(out_fn, overwrite=overwrite)
             vpc.clean()
         except Exception as e:
             log.error(e)
@@ -1307,9 +1325,16 @@ def vphas_offset_catalogue_main(args=None):
     parser.add_argument('-e', '--extension', metavar='CCD',
                         type=int, default=None,
                         help='CCD extension number.')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Turn on debug output.')
     parser.add_argument('offset', nargs='+',
                         help='Offset name, e.g. 0001a or 0001b.')
     args = parser.parse_args(args)
+
+    if args.verbose:
+        log.setLevel('DEBUG')
+    else:
+        log.setLevel('INFO')
 
     for offset in args.offset:
         if args.extension is not None:
