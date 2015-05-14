@@ -405,8 +405,9 @@ class VphasFrame(object):
         """Fits a 2D Gaussian PSF to the stars in the images.
 
         This will populate self._cache['psf_fwhm'], self._cache['psf_ratio'],
-        self._cache['psf_theta']. The estimates are intended to serve as input
-        to the DAOFIND routine.
+        self._cache['psf_theta']. The estimates are intended to serve as the
+        initial input to the DAOFIND routine.  It is NOT used for the final
+        PSF photometry, for that we rely on DAOPHOT's PSF routine.
 
         Parameters
         ----------
@@ -561,6 +562,9 @@ class VphasFrame(object):
         tbl = dp.get_allstar_phot_table()
         tbl.meta['band'] = self.band
         tbl.meta[self.band + 'PsfRms'] = psf_scatter
+        tbl.meta[self.band + 'Seeing'] = VPHAS_PIXEL_SCALE * self.psf_fwhm
+        tbl.meta[self.band + 'Airm'] = self.airmass
+        tbl.meta[self.band + 'MJD'] = self.primary_header['MJD-OBS']        
         # Add celestial coordinates ra/dec and nearest neighbour distance as columns
         ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
                                  tbl['YCENTER_ALLSTAR'],
@@ -584,7 +588,7 @@ class VphasFrame(object):
                                            for idx in tbl['ID']]
         tbl['mjd_'+self.band] = np.repeat(self.primary_header['MJD-OBS'],
                                           len(tbl))
-        tbl['psffwhm_'+self.band] = np.repeat(VPHAS_PIXEL_SCALE * self.psf_fwhm,
+        tbl['psffwhm_'+self.band] = np.repeat(tbl.meta[self.band + 'Seeing'],
                                               len(tbl))
         tbl['airmass_'+self.band] = np.repeat(self.airmass, len(tbl))
         # Rename existing columns from DAOPHOT to our conventions
@@ -629,10 +633,12 @@ class VphasFrame(object):
                         (tbl['pier_' + self.band].filled(0) != 0) |
                         (tbl['chi_' + self.band].filled(999) > chi_max)
                        )
+        # Flag bad PSF templates
+        flag_bad_psf = np.repeat(psf_scatter > 0.1, len(tbl))
 
         # Now use the above flags to mask out column values
         # First mask out PSF photometry for faint/shifted/bad fits
-        mask_psfphot = flag_too_faint | flag_shifted | flag_bad_fit
+        mask_psfphot = flag_too_faint | flag_shifted | flag_bad_fit | flag_bad_psf
         for prefix in ['', 'err_']:
             tbl[prefix + self.band].mask[mask_psfphot] = True
         # Mask out aperture photometry for faint/shifted fits
@@ -648,6 +654,7 @@ class VphasFrame(object):
         # Make the error messages more informative
         tbl['error_' + self.band][flag_shifted | flag_bad_fit] = 'Bad_fit'
         tbl['error_' + self.band][flag_too_faint] = 'Too_faint'
+        tbl['error_' + self.band][flag_bad_psf] = 'Bad_psf'
         tbl['error_' + self.band][flag_off_image] = 'Off_image'
 
         # The "clean" quality flag helps the user select good sources
@@ -1343,3 +1350,77 @@ def vphas_offset_catalogue_main(args=None):
         else:
             ccdlist = range(1, 33)
         vphas_offset_catalogue(offset, ccdlist=ccdlist, configfile=args.config)
+
+
+def offset_catalogue_metadata(filename):
+    """Returns a dictionary containing the metadata of a single catalogue.
+
+    Parameters
+    ----------
+    filename : str
+        Path to the offset catalogue.
+
+    Returns
+    -------
+    metadata : dict
+    """
+    try:
+        from collections import OrderedDict
+        row = OrderedDict()
+        f = fits.open(filename)
+        row['filename'] = os.path.basename(filename)
+        row['offset'] = row['filename'].split('-')[0]
+        row['extension'] = row['filename'].split('-')[1]
+
+        # Approximate the footprint by the ra/dec range
+        # we can do this because the position angle is approx zero
+        for colname in ['ra', 'dec']:
+            row[colname + '_min'] = np.nanmin(f[1].data[colname])
+            row[colname + '_max'] = np.nanmax(f[1].data[colname])
+        # We need a special case for CCDs that cross the meridian
+        if row['ra_max'] - row['ra_min'] > 180:
+            ra = f[1].data['ra']
+            ra_min = np.nanmin(ra[ra > 180])
+            ra_max = np.nanmax(ra[ra < 180]) + 360
+
+        row['n_stars'] = len(f[1].data)
+        row['n_clean'] = f[1].data['clean'].sum()
+        for band in VPHAS_BANDS:
+            try:
+                row[band + 'psfrms'] = f[1].header[(band + 'PSFRMS').upper()]
+                row['n_clean_' + band] = f[1].data['clean_' + band].sum()
+                row['med_maglim_' + band] = np.nanmedian(f[1].data['magLim_' + band])
+                row['psffwhm_' + band] = f[1].data['psffwhm_' + band][0]
+            except KeyError:  # band may not be in the catalogue
+                row[band + 'psfrms'] = np.nan
+                row['n_clean_' + band] = np.nan
+                row['med_maglim_' + band] = np.nan
+                row['psffwhm_' + band] = np.nan
+        return row
+    except Exception:
+        log.error('Failed to extract metadata for {}'.format(filename))
+        return None
+
+
+def vphas_index_offset_catalogues_main(args=None):
+    """Function called by the vphas-index-offset-catalogue command line script."""
+    import glob
+    from astropy.utils.console import ProgressBar
+    cfg = configparser.ConfigParser()
+    cfg.read(DEFAULT_CONFIGFILE)
+
+    DESTINATION = 'vphas-offsetcat-index.fits'
+    log.info('Writing {}'.format(DESTINATION))
+
+    import multiprocessing
+    pool = multiprocessing.Pool(4)
+    filenames = glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))
+    rows = []
+    with ProgressBar(len(filenames)) as bar:
+        for row in pool.imap(offset_catalogue_metadata, filenames):
+            if row != None:
+                rows.append(row)
+            bar.update()
+    tbl = Table(rows)
+    tbl.write(DESTINATION, overwrite=True)
+

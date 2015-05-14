@@ -5,7 +5,8 @@ entry_points = {'console_scripts': [
     'vst-pawplot = surveytools.quicklook:vst_pawplot_main',
     'vphas-quicklook = surveytools.quicklook:vphas_quicklook_main',
     'vphas-filenames = surveytools.footprint:vphas_filenames_main',
-    'vphas-offset-catalogue = surveytools.catalogue:vphas_offset_catalogue_main'
+    'vphas-offset-catalogue = surveytools.catalogue:vphas_offset_catalogue_main',
+    'vphas-index-offset-catalogues = surveytools.catalogue:vphas_index_offset_catalogues_main'
 ]}
 
 setup(name='surveytools',
