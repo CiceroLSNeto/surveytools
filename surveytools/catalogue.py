@@ -634,7 +634,7 @@ class VphasFrame(object):
                         (tbl['chi_' + self.band].filled(999) > chi_max)
                        )
         # Flag bad PSF templates
-        flag_bad_psf = np.repeat(psf_scatter > 0.1, len(tbl))
+        flag_bad_psf = np.repeat(psf_scatter > 0.15, len(tbl))
 
         # Now use the above flags to mask out column values
         # First mask out PSF photometry for faint/shifted/bad fits
