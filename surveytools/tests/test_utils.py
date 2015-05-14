@@ -34,8 +34,8 @@ class TestCoalesce():
 
     def setup_method(self, method):
         self.c1 = MaskedColumn(name='col1', data=[1, 2, 3], mask=[False, False, False])
-        self.c2 = MaskedColumn(name='col1', data=[4, 5, 6], mask=[True, False, False])
-        self.c3 = MaskedColumn(name='col1', data=[7, 8, 9], mask=[False, True, False])
+        self.c2 = MaskedColumn(name='col2', data=[4, 5, 6], mask=[True, False, False])
+        self.c3 = MaskedColumn(name='col3', data=[7, 8, 9], mask=[False, True, False])
 
     def test_basic(self):
         assert np.all(coalesce([self.c1, self.c2, self.c3]) == self.c1)
