@@ -565,7 +565,7 @@ class VphasFrame(object):
         tbl.meta['band'] = self.band
         tbl.meta[self.band + 'PsfRms'] = psf_scatter
         tbl.meta[self.band + 'Seeing'] = VPHAS_PIXEL_SCALE * self.psf_fwhm
-        tbl.meta[self.band + 'Airmass'] = self.airmass
+        tbl.meta[self.band + 'Airm'] = self.airmass
         tbl.meta[self.band + 'MJD'] = self.primary_header['MJD-OBS']        
         # Add celestial coordinates ra/dec and nearest neighbour distance as columns
         ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
@@ -635,10 +635,12 @@ class VphasFrame(object):
                         (tbl['pier_' + self.band].filled(0) != 0) |
                         (tbl['chi_' + self.band].filled(999) > chi_max)
                        )
+        # Flag bad PSF templates
+        flag_bad_psf = np.repeat(psf_scatter > 0.1, len(tbl))
 
         # Now use the above flags to mask out column values
         # First mask out PSF photometry for faint/shifted/bad fits
-        mask_psfphot = flag_too_faint | flag_shifted | flag_bad_fit
+        mask_psfphot = flag_too_faint | flag_shifted | flag_bad_fit | flag_bad_psf
         for prefix in ['', 'err_']:
             tbl[prefix + self.band].mask[mask_psfphot] = True
         # Mask out aperture photometry for faint/shifted fits
@@ -654,6 +656,7 @@ class VphasFrame(object):
         # Make the error messages more informative
         tbl['error_' + self.band][flag_shifted | flag_bad_fit] = 'Bad_fit'
         tbl['error_' + self.band][flag_too_faint] = 'Too_faint'
+        tbl['error_' + self.band][flag_bad_psf] = 'Bad_psf'
         tbl['error_' + self.band][flag_off_image] = 'Off_image'
 
         # The "clean" quality flag helps the user select good sources
