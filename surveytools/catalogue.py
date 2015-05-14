@@ -7,11 +7,9 @@ VphasOffsetCatalogue
 
 Example use
 -----------
-Create a photometric catalogue of VPHAS pointing 0149a:
+Create a photometric catalogue of VPHAS pointing 0149a from the command-line:
 ```
-import vphas
-offset = vphas.VphasOffsetCatalogue('0149a')
-offset.create_catalogue().write('mycatalogue.fits')
+vphas-offset-catalogue 0149a
 ```
 
 Terminology
@@ -927,7 +925,7 @@ class VphasOffsetCatalogue(object):
             fig.savefig(output_fn, dpi=120, facecolor='black')
             pl.close(fig)
 
-    @timeout(1800)  # This should never take more than an hour
+    @timeout(1800)  # This should never take more than 30 mins
     def create_ccd_catalogue(self, images, ccd=1):
         """Create a multi-band catalogue for the area covered by a single ccd.
 
