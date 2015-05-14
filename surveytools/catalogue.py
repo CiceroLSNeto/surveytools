@@ -1104,8 +1104,8 @@ class VphasOffsetCatalogue(object):
         idx, nneighbor_dist, dist3d = crd_i.match_to_catalog_sky(crd_i,
                                                                  nthneighbor=2)
         cutoff = np.percentile(nneighbor_dist, 70) * nneighbor_dist.unit
-        if cutoff > 5*u.arcsec:
-            cutoff = 5.*u.arcsec  # Don't be too strict in sparse fields
+        if cutoff > 4*u.arcsec:
+            cutoff = 4.*u.arcsec  # Don't be too strict in sparse fields
         mask_bad_template = nneighbor_dist < cutoff
         log.info('PSF neighbour limit = {0:.2f} (rejects {1}).'
                  .format(cutoff.to(u.arcsec), mask_bad_template.sum()))
@@ -1132,7 +1132,11 @@ class VphasOffsetCatalogue(object):
             log.info('PSF sigma-clipping in {0}: now {1} rejected.'
                      .format(band, mask_bad_template.sum()))
 
-        psf_table = sources['i'][~mask_bad_template]
+        # If there are less than 10 stars kept, ignore the mask
+        if (~mask_bad_template).sum() < 10:
+            psf_table = sources['i']
+        else:
+            psf_table = sources['i'][~mask_bad_template]
         log.info('Found {0} candidate stars for PSF model fitting (rejected '
                  '{1}).'.format(len(psf_table), mask_bad_template.sum()))
         return master_tbl, psf_table
@@ -1299,7 +1303,8 @@ def photometry_task(par):
 
 
 def vphas_offset_catalogue(offset, ccdlist=range(1, 33),
-                           configfile=None, overwrite=True):
+                           configfile=None, verbose=False,
+                           overwrite=True):
     """Make a catalogue."""
     for ccd in ccdlist:
         try:
@@ -1316,6 +1321,8 @@ def vphas_offset_catalogue(offset, ccdlist=range(1, 33),
             vpc.clean()
         except Exception as e:
             log.error('{}[{}]: {}'.format(offset, ccd, e))
+            if verbose:
+                raise e
         finally:
             vpc.clean()
 
@@ -1349,7 +1356,9 @@ def vphas_offset_catalogue_main(args=None):
             ccdlist = [args.extension]
         else:
             ccdlist = range(1, 33)
-        vphas_offset_catalogue(offset, ccdlist=ccdlist, configfile=args.config)
+        vphas_offset_catalogue(offset, ccdlist=ccdlist,
+                               configfile=args.config,
+                               verbose=args.verbose)
 
 
 def offset_catalogue_metadata(filename):
