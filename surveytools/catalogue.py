@@ -407,8 +407,9 @@ class VphasFrame(object):
         """Fits a 2D Gaussian PSF to the stars in the images.
 
         This will populate self._cache['psf_fwhm'], self._cache['psf_ratio'],
-        self._cache['psf_theta']. The estimates are intended to serve as input
-        to the DAOFIND routine.
+        self._cache['psf_theta']. The estimates are intended to serve as the
+        initial input to the DAOFIND routine.  It is NOT used for the final
+        PSF photometry, for that we rely on DAOPHOT's PSF routine.
 
         Parameters
         ----------
@@ -563,6 +564,9 @@ class VphasFrame(object):
         tbl = dp.get_allstar_phot_table()
         tbl.meta['band'] = self.band
         tbl.meta[self.band + 'PsfRms'] = psf_scatter
+        tbl.meta[self.band + 'Seeing'] = VPHAS_PIXEL_SCALE * self.psf_fwhm
+        tbl.meta[self.band + 'Airmass'] = self.airmass
+        tbl.meta[self.band + 'MJD'] = self.primary_header['MJD-OBS']        
         # Add celestial coordinates ra/dec and nearest neighbour distance as columns
         ra, dec = self.pix2world(tbl['XCENTER_ALLSTAR'],
                                  tbl['YCENTER_ALLSTAR'],
@@ -586,7 +590,7 @@ class VphasFrame(object):
                                            for idx in tbl['ID']]
         tbl['mjd_'+self.band] = np.repeat(self.primary_header['MJD-OBS'],
                                           len(tbl))
-        tbl['psffwhm_'+self.band] = np.repeat(VPHAS_PIXEL_SCALE * self.psf_fwhm,
+        tbl['psffwhm_'+self.band] = np.repeat(tbl.meta[self.band + 'Seeing'],
                                               len(tbl))
         tbl['airmass_'+self.band] = np.repeat(self.airmass, len(tbl))
         # Rename existing columns from DAOPHOT to our conventions
@@ -1345,3 +1349,63 @@ def vphas_offset_catalogue_main(args=None):
         else:
             ccdlist = range(1, 33)
         vphas_offset_catalogue(offset, ccdlist=ccdlist, configfile=args.config)
+
+
+def offset_catalogue_metadata(filename):
+    """Returns a dictionary containing the metadata of a single catalogue.
+
+    Parameters
+    ----------
+    filename : str
+        Path to the offset catalogue.
+
+    Returns
+    -------
+    metadata : dict
+    """
+    row = {}
+    f = fits.open(filename)
+    row['filename'] = os.path.basename(filename)
+    row['offset'] = row['filename'].split('-')[0]
+    row['extension'] = row['filename'].split('-')[1]
+
+    # Approximate the footprint by the ra/dec range
+    # we can do this because the position angle is approx zero
+    for colname in ['ra', 'dec']:
+        row[colname + '_min'] = np.nanmin(f[1].data[colname])
+        row[colname + '_max'] = np.nanmax(f[1].data[colname])
+    # We need a special case for CCDs that cross the meridian
+    if row['ra_max'] - row['ra_min'] > 180:
+        ra = f[1].data['ra']
+        ra_min = np.nanmin(ra[ra > 180])
+        ra_max = np.nanmax(ra[ra < 180]) + 360
+
+    row['n_stars'] = len(f[1].data)
+    row['n_clean'] = f[1].data['clean'].sum()
+    for band in VPHAS_BANDS:
+        try:
+            row[band + 'psfrms'] = f[1].header[(band + 'PSFRMS').upper()]
+            row['n_clean_' + band] = f[1].data['clean_' + band].sum()
+            row['med_maglim_' + band] = np.nanmedian(f[1].data['magLim_' + band])
+            row['psffwhm_' + band] = f[1].data['psffwhm_' + band][0]
+        except KeyError:  # band may not be in the catalogue
+            pass
+    return row
+
+
+def vphas_index_offset_catalogues_main(args=None):
+    import glob
+    from astropy.utils.console import ProgressBar
+    cfg = configparser.ConfigParser()
+    cfg.read(DEFAULT_CONFIGFILE)
+
+    DESTINATION = 'vphas-offsetcat-index.fits'
+    log.info('Writing {}'.format(DESTINATION))
+    rows = []
+    for filename in ProgressBar(glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))):
+        try:
+            rows.append(offset_catalogue_metadata(filename))
+        except Exception:
+            log.error('Failed to extract metadata for {}'.format(filename))
+    tbl = Table(rows)
+    tbl.write(DESTINATION, overwrite=True)
