@@ -1394,7 +1394,10 @@ def offset_catalogue_metadata(filename):
                 row['med_maglim_' + band] = np.nanmedian(f[1].data['magLim_' + band])
                 row['psffwhm_' + band] = f[1].data['psffwhm_' + band][0]
             except KeyError:  # band may not be in the catalogue
-                pass
+                row[band + 'psfrms'] = np.nan
+                row['n_clean_' + band] = np.nan
+                row['med_maglim_' + band] = np.nan
+                row['psffwhm_' + band] = np.nan
         return row
     except Exception:
         log.error('Failed to extract metadata for {}'.format(filename))
@@ -1402,6 +1405,7 @@ def offset_catalogue_metadata(filename):
 
 
 def vphas_index_offset_catalogues_main(args=None):
+    """Function called by the vphas-index-offset-catalogue command line script."""
     import glob
     from astropy.utils.console import ProgressBar
     cfg = configparser.ConfigParser()
@@ -1422,13 +1426,3 @@ def vphas_index_offset_catalogues_main(args=None):
     tbl = Table(rows)
     tbl.write(DESTINATION, overwrite=True)
 
-    """
-    rows = []
-    for filename in ProgressBar(glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))):
-        try:
-            rows.append(offset_catalogue_metadata(filename))
-        except Exception:
-            log.error('Failed to extract metadata for {}'.format(filename))
-    tbl = Table(rows)
-    tbl.write(DESTINATION, overwrite=True)
-    """
