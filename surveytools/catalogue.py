@@ -1363,34 +1363,39 @@ def offset_catalogue_metadata(filename):
     -------
     metadata : dict
     """
-    row = {}
-    f = fits.open(filename)
-    row['filename'] = os.path.basename(filename)
-    row['offset'] = row['filename'].split('-')[0]
-    row['extension'] = row['filename'].split('-')[1]
+    try:
+        from collections import OrderedDict
+        row = OrderedDict()
+        f = fits.open(filename)
+        row['filename'] = os.path.basename(filename)
+        row['offset'] = row['filename'].split('-')[0]
+        row['extension'] = row['filename'].split('-')[1]
 
-    # Approximate the footprint by the ra/dec range
-    # we can do this because the position angle is approx zero
-    for colname in ['ra', 'dec']:
-        row[colname + '_min'] = np.nanmin(f[1].data[colname])
-        row[colname + '_max'] = np.nanmax(f[1].data[colname])
-    # We need a special case for CCDs that cross the meridian
-    if row['ra_max'] - row['ra_min'] > 180:
-        ra = f[1].data['ra']
-        ra_min = np.nanmin(ra[ra > 180])
-        ra_max = np.nanmax(ra[ra < 180]) + 360
+        # Approximate the footprint by the ra/dec range
+        # we can do this because the position angle is approx zero
+        for colname in ['ra', 'dec']:
+            row[colname + '_min'] = np.nanmin(f[1].data[colname])
+            row[colname + '_max'] = np.nanmax(f[1].data[colname])
+        # We need a special case for CCDs that cross the meridian
+        if row['ra_max'] - row['ra_min'] > 180:
+            ra = f[1].data['ra']
+            ra_min = np.nanmin(ra[ra > 180])
+            ra_max = np.nanmax(ra[ra < 180]) + 360
 
-    row['n_stars'] = len(f[1].data)
-    row['n_clean'] = f[1].data['clean'].sum()
-    for band in VPHAS_BANDS:
-        try:
-            row[band + 'psfrms'] = f[1].header[(band + 'PSFRMS').upper()]
-            row['n_clean_' + band] = f[1].data['clean_' + band].sum()
-            row['med_maglim_' + band] = np.nanmedian(f[1].data['magLim_' + band])
-            row['psffwhm_' + band] = f[1].data['psffwhm_' + band][0]
-        except KeyError:  # band may not be in the catalogue
-            pass
-    return row
+        row['n_stars'] = len(f[1].data)
+        row['n_clean'] = f[1].data['clean'].sum()
+        for band in VPHAS_BANDS:
+            try:
+                row[band + 'psfrms'] = f[1].header[(band + 'PSFRMS').upper()]
+                row['n_clean_' + band] = f[1].data['clean_' + band].sum()
+                row['med_maglim_' + band] = np.nanmedian(f[1].data['magLim_' + band])
+                row['psffwhm_' + band] = f[1].data['psffwhm_' + band][0]
+            except KeyError:  # band may not be in the catalogue
+                pass
+        return row
+    except Exception:
+        log.error('Failed to extract metadata for {}'.format(filename))
+        return None
 
 
 def vphas_index_offset_catalogues_main(args=None):
@@ -1401,6 +1406,20 @@ def vphas_index_offset_catalogues_main(args=None):
 
     DESTINATION = 'vphas-offsetcat-index.fits'
     log.info('Writing {}'.format(DESTINATION))
+
+    import multiprocessing
+    pool = multiprocessing.Pool(4)
+    filenames = glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))
+    rows = []
+    with ProgressBar(len(filenames)) as bar:
+        for row in pool.imap(offset_catalogue_metadata, filenames):
+            if row != None:
+                rows.append(row)
+            bar.update()
+    tbl = Table(rows)
+    tbl.write(DESTINATION, overwrite=True)
+
+    """
     rows = []
     for filename in ProgressBar(glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))):
         try:
@@ -1409,3 +1428,4 @@ def vphas_index_offset_catalogues_main(args=None):
             log.error('Failed to extract metadata for {}'.format(filename))
     tbl = Table(rows)
     tbl.write(DESTINATION, overwrite=True)
+    """
