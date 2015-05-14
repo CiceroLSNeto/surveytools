@@ -395,9 +395,9 @@ class Daophot(object):
             orig_maxnpsf = iraf.pstselect.getParDict()['maxnpsf'].value  # calling `iraf.pstselect.maxnpsf` doesnt work for some strange reason
             tmp_varorder = iraf.daopars.varorder    
             iraf.daopars.varorder = 0
-            attempts = 5
-            for attempt_no, maxnpsf in enumerate(
-                np.linspace(max(orig_maxnpsf-10, 20), 10, attempts, dtype=int)):
+            attempts = 10
+            for attempt_no, maxnpsf in enumerate([30, 20, 15, 10, 8, 6, 5, 4, 3, 2]):
+                #np.logspace(np.log10(max(orig_maxnpsf-10, 30)), np.log10(2), attempts, dtype=int)):
                 # It's important to remove the PSF output file before repeating
                 # the fit, otherwise daophot will add a 2nd extension to it.
                 try:
@@ -565,12 +565,12 @@ def pstselect_prune(pstselect_output_path, new_path):
     """
     tbl = Table.read(pstselect_output_path, format='daophot')
     # We prune objects using sigma-clipping on the sky estimate.
-    # We will try increasing values of sigma, until less than half of the stars
+    # We will try increasing values of sigma, until less 40% of the stars
     # are rejected.
     from astropy.stats import sigma_clip
     for sigma in [2., 3., 4., 5., 10.]:
         bad_mask = sigma_clip(tbl['MSKY'].data, sig=sigma, iters=None).mask
-        if bad_mask.sum() < 0.3*len(tbl):  # stop if <30% rejected
+        if bad_mask.sum() < 0.4*len(tbl):  # stop if <40% rejected
             break
     log.info('Rejected {} stars for PSF fitting {}'.format(bad_mask.sum(), new_path))
     # Now write the new file without the pruned objects to disk
