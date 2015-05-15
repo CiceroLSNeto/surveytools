@@ -1,9 +1,9 @@
 #!/bin/bash -f
-# Creates a catalogue for a given OFFSET                                                         
-#PBS -l nodes=1:ppn=5
+# Creates a catalogue for a given VPHAS offset pointing
+#PBS -l nodes=1:ppn=4
 #PBS -k oe                                                          
 #PBS -q cmain
-#PBS -l walltime=23:59:00
+#PBS -l walltime=19:59:00
 #PBS -m a
 
 echo `date`
