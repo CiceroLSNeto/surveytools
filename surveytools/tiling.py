@@ -83,8 +83,42 @@ class VphasCatalogTile(object):
         self.cfg = configparser.ConfigParser()
         self.cfg.read(configfile)
         # Init the set of catalogue and cache
-        self.catalogset = vphas_catalog_set().subset_galactic(l, l+size, b, b+size)
+        self.catalogset = self._get_all_catalogs().subset_galactic(l, l+size, b, b+size)
         self.primary_id_cache = {}
+
+    def _get_all_catalogs(self):
+        """
+        Note: we use galactic longitudes in the range [180, 540] to avoid
+        edge issues.
+        """
+        cats = Table.read(os.path.join(self.cfg['vphas']['cat_dir'], 'vphas-offsetcat-index.fits'))
+        # Add the min/max range in galactic latitude and longitude
+        galcrd = [SkyCoord(cats[ra_col], cats[dec_col], unit='deg').galactic
+                  for ra_col in ['ra_min', 'ra_max']
+                  for dec_col in ['dec_min', 'dec_max']]
+        longitudes = np.array([c.l for c in galcrd])
+        # Ensure longitudes are in the range [180, 540]
+        longitudes[longitudes < 180] += 360.
+        latitudes = np.array([c.b for c in galcrd])
+        cats['l_min'] = np.min(longitudes, axis=0)
+        cats['l_max'] = np.max(longitudes, axis=0)
+        cats['b_min'] = np.min(latitudes, axis=0)
+        cats['b_max'] = np.max(latitudes, axis=0)
+        cats['polygon'] = np.array([
+                                Polygon(
+                                    LinearRing([(cats['ra_min'][i], cats['dec_min'][i]),
+                                                (cats['ra_min'][i], cats['dec_max'][i]),
+                                                (cats['ra_max'][i], cats['dec_max'][i]),
+                                                (cats['ra_max'][i], cats['dec_min'][i])])
+                                        )
+                                     for i in range(len(cats))], dtype='O')
+        cats['polygon_gal'] = np.array([Polygon(LinearRing([(cats['l_min'][i], cats['b_min'][i]),
+                                                     (cats['l_min'][i], cats['b_max'][i]),
+                                                     (cats['l_max'][i], cats['b_max'][i]),
+                                                     (cats['l_max'][i], cats['b_min'][i])]))
+                                     for i in range(len(cats))], dtype='O')
+        return VphasCatalogSet(cats)
+
 
     def create(self):
         self.resolve()
@@ -213,7 +247,7 @@ class VphasCatalogTile(object):
         destination_dir = self.cfg['vphas']['tiled_cat_dir']
         if not os.path.exists(destination_dir):
             os.makedirs(destination_dir)
-        
+
         instring = ''
         for fn in self.catalogset.table['filename']:
             fnres = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
@@ -231,40 +265,6 @@ class VphasCatalogTile(object):
         log.info(cmd)
         status = os.system(cmd)
         log.info('concat: '+str(status))
-
-
-def vphas_catalog_set():
-    """
-    Note: we use galactic longitudes in the range [180, 540] to avoid
-    edge issues.
-    """
-    cats = Table.read('/home/gb/tmp/vphascats/vphas-offsetcat-index.fits')
-    # Add the min/max range in galactic latitude and longitude
-    galcrd = [SkyCoord(cats[ra_col], cats[dec_col], unit='deg').galactic
-              for ra_col in ['ra_min', 'ra_max']
-              for dec_col in ['dec_min', 'dec_max']]
-    longitudes = np.array([c.l for c in galcrd])
-    # Ensure longitudes are in the range [180, 540]
-    longitudes[longitudes < 180] += 360.
-    latitudes = np.array([c.b for c in galcrd])
-    cats['l_min'] = np.min(longitudes, axis=0)
-    cats['l_max'] = np.max(longitudes, axis=0)
-    cats['b_min'] = np.min(latitudes, axis=0)
-    cats['b_max'] = np.max(latitudes, axis=0)
-    cats['polygon'] = np.array([
-                            Polygon(
-                                LinearRing([(cats['ra_min'][i], cats['dec_min'][i]),
-                                            (cats['ra_min'][i], cats['dec_max'][i]),
-                                            (cats['ra_max'][i], cats['dec_max'][i]),
-                                            (cats['ra_max'][i], cats['dec_min'][i])])
-                                    )
-                                 for i in range(len(cats))], dtype='O')
-    cats['polygon_gal'] = np.array([Polygon(LinearRing([(cats['l_min'][i], cats['b_min'][i]),
-                                                 (cats['l_min'][i], cats['b_max'][i]),
-                                                 (cats['l_max'][i], cats['b_max'][i]),
-                                                 (cats['l_max'][i], cats['b_min'][i])]))
-                                 for i in range(len(cats))], dtype='O')
-    return VphasCatalogSet(cats)
 
 
 def add_photid(tbl, filename):
