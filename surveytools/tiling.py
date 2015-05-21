@@ -208,7 +208,8 @@ class VphasCatalogTile(object):
         path = os.path.join(self.cfg['catalogue']['destdir'], fn)
         tbl = Table.read(path)
         tbl = add_photid(tbl, fn)
-        tbl = self._add_blue_cols(tbl)
+        if 'g' not in tbl.columns:
+            tbl = self._add_blue_cols(tbl)
         tbl['primaryID'] = [self.primary_id_cache[photid] for photid in tbl['photID']]
         tbl['is_primary'] = tbl['photID'] == tbl['primaryID']
         destination = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
