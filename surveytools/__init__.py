@@ -21,6 +21,11 @@ VPHAS_BANDS = ['u', 'g', 'r2', 'ha', 'r', 'i']
 SURVEYTOOLS_PATH = os.path.abspath(os.path.dirname(__file__))
 SURVEYTOOLS_DATA = os.path.join(SURVEYTOOLS_PATH, 'data')
 SURVEYTOOLS_CONFIGDIR = os.path.join(SURVEYTOOLS_PATH, 'config')
+SURVEYTOOLS_LIB_DIR = os.path.join(SURVEYTOOLS_PATH, 'lib')
+
+# How to run stilts?
+STILTS_JAR = os.path.join(SURVEYTOOLS_LIB_DIR, 'stilts.jar')
+STILTS = 'nice java -Xmx2000M -XX:+UseConcMarkSweepGC -jar ' + STILTS_JAR
 
 # Position of the VST/OmegaCAM CCDs.
 # left-right = East-West and top-bottom = North-South;

@@ -6,7 +6,8 @@ entry_points = {'console_scripts': [
     'vphas-quicklook = surveytools.quicklook:vphas_quicklook_main',
     'vphas-filenames = surveytools.footprint:vphas_filenames_main',
     'vphas-offset-catalogue = surveytools.catalogue:vphas_offset_catalogue_main',
-    'vphas-index-offset-catalogues = surveytools.catalogue:vphas_index_offset_catalogues_main'
+    'vphas-index-offset-catalogues = surveytools.catalogue:vphas_index_offset_catalogues_main',
+    'vphas-tile-merge = surveytools.tiling:vphas_tile_merge_main'
 ]}
 
 setup(name='surveytools',
