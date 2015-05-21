@@ -5,11 +5,15 @@ Classes
 VphasFrame
 VphasOffsetCatalogue
 
-Example use
------------
+Example command-line use
+------------------------
 Create a photometric catalogue of VPHAS pointing 0149a from the command-line:
 ```
-vphas-offset-catalogue 0149a
+$ vphas-offset-catalogue 0149a
+```
+Build an index table of catalogues created:
+```
+$ vphas-index-offset-catalogues
 ```
 
 Terminology
@@ -1025,7 +1029,7 @@ class VphasOffsetCatalogue(object):
         merged['r_ha'] = merged['r'] - merged['ha']
         if 'u' in frames:
             merged['u_g'] = merged['u'] - merged['g']
-            merged['g_r'] = merged['g'] - merged['r']
+            merged['g_r'] = merged['g'] - merged['r2']
             merged['clean'] = (merged['clean_g'].filled(False) &
                                merged['clean_r'].filled(False) &
                                merged['clean_i'].filled(False) &
@@ -1412,7 +1416,7 @@ def offset_catalogue_metadata(filename):
 
 
 def vphas_index_offset_catalogues_main(args=None):
-    """Function called by the vphas-index-offset-catalogue command line script."""
+    """Function called by the vphas-index-offset-catalogues command line script."""
     import glob
     from astropy.utils.console import ProgressBar
     cfg = configparser.ConfigParser()
@@ -1432,4 +1436,3 @@ def vphas_index_offset_catalogues_main(args=None):
             bar.update()
     tbl = Table(rows)
     tbl.write(DESTINATION, overwrite=True)
-
