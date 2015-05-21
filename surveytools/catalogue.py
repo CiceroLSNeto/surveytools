@@ -1426,7 +1426,7 @@ def vphas_index_offset_catalogues_main(args=None):
     log.info('Writing {}'.format(DESTINATION))
 
     import multiprocessing
-    pool = multiprocessing.Pool(4)
+    pool = multiprocessing.Pool(8)
     filenames = glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))
     rows = []
     with ProgressBar(len(filenames)) as bar:
