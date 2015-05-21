@@ -231,9 +231,12 @@ class VphasCatalogTile(object):
                 if colname == 'clean_':
                     mydtype = 'bool'
                     mydata = col_false
-                elif colname in ['detectionID_', 'error_']:
+                elif colname in 'detectionID_':
                     mydtype = 'str'
                     mydata = col_nullbyte
+                elif colname == 'error_':
+                    mydtype = 'str'
+                    mydata = np.array(['No_blue_data' for i in range(len(tbl))])
                 else:
                     mydtype = 'double'
                     mydata = col_nan
