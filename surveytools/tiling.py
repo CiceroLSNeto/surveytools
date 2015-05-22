@@ -26,12 +26,14 @@ from .catalogue import DEFAULT_CONFIGFILE
 
 # Which columns do we want to keep in the final tiled catalogues?
 RELEASE_COLUMNS = ['ra', 'dec', 'u_g', 'g_r', 'r_i', 'r_ha',
-                   'photID', 'primaryID', 'is_primary']
+                   'photID', 'primaryID', 'is_primary', 'nndist', 'clean']
 for band in VPHAS_BANDS:
     for prefix in ['clean_', '', 'err_', 'chi_', 'error_',
                    'aperMag_', 'aperMagErr_', 'snr_', 'magLim_',
                    'psffwhm_', 'mjd_', 'x_', 'y_', 'detectionID_']:
         RELEASE_COLUMNS.append(prefix+band)
+for extra in ['field', 'ccd']:
+RELEASE_COLUMNS.append(extra)
 
 
 class VphasCatalogSet(object):

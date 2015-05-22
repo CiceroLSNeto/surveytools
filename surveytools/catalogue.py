@@ -1031,6 +1031,7 @@ class VphasOffsetCatalogue(object):
             merged['u_g'] = merged['u'] - merged['g']
             merged['g_r'] = merged['g'] - merged['r2']
             merged['clean'] = (merged['clean_g'].filled(False) &
+                               merged['clean_r2'].filled(False) &
                                merged['clean_r'].filled(False) &
                                merged['clean_i'].filled(False) &
                                merged['clean_ha'].filled(False))
