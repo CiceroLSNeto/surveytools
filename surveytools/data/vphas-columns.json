@@ -1,0 +1,205 @@
+[
+    {
+        "name": "name",
+        "type": "string",
+        "unit": "",
+        "desc": "Position-based source name in the sexagesimal form: \"VPHAS-DR2 JHHMMSS.ss+DDMMSS.s\". VPHAS-DR2 indicates the survey and data release, while J indicates that the position is J2000 equatorial."
+    },
+    {
+        "name": "ra",
+        "type": "double",
+        "unit": "degrees",
+        "desc": "J2000 Right Ascension with respect to the 2MASS PSC reference frame, which is consistent with ICRS to within 0.1 arcsec.  The coordinate given is obtained from the astrometric measurement in the i-band exposure. If the source is undetected in i, then the r, r2, g, ha, or u coordinate is given (bands are listed in order of preference).",
+        "form": ".5f",
+        "suff": "°"
+    },
+    {
+        "name": "dec",
+        "type": "double",
+        "unit": "degrees",
+        "desc": "J2000 Declination. See comments above.",
+        "form": ".5f",
+        "suff": "°"
+    },
+    {
+        "name": "l",
+        "type": "double",
+        "unit": "degrees",
+        "desc": "Galactic longitude (IAU 1958 system).",
+        "form": ".5f",
+        "suff": "°"
+    },
+    {
+        "name": "b",
+        "type": "double",
+        "unit": "degrees",
+        "desc": "Galactic latitude (IAU 1958 system).",
+        "form": ".5f",
+        "suff": "°"
+    },
+    {
+        "name": "u_g",
+        "type": "float",
+        "unit": "mag",
+        "desc": "(u - g) colour, formed by subtracting columns <a href=\"#u\">u</a> and <a href=\"#g\">g</a>. To obtain the uncertainty, take the root of the sum of the squares of columns <a href=\"#err_u\">err_u</a> and <a href=\"#err_g\">err_g</a>.",
+        "form": ".2f"
+    },
+    {
+        "name": "g_r",
+        "type": "float",
+        "unit": "mag",
+        "desc": "(g - r2) colour, formed by subtracting columns <a href=\"#g\">g</a> and <a href=\"#r2\">r2</a>. See comments above.",
+        "form": ".2f"
+    },
+    {
+        "name": "r_i",
+        "type": "float",
+        "unit": "mag",
+        "desc": "(r - i) colour, formed by subtracting columns <a href=\"#r\">r</a> and <a href=\"#i\">i</a>. See comments above.",
+        "form": ".2f"
+    },
+    {
+        "name": "r_ha",
+        "type": "float",
+        "unit": "mag",
+        "desc": "(r - Halpha) colour, formed by subtracting columns <a href=\"#r\">r</a> and <a href=\"#ha\">ha</a>. See comments above.",
+        "form": ".2f"
+    }, 
+    {
+        "name": "photID",
+        "type": "string",
+        "unit": "",
+        "desc": "Unique identifier of the detection in the format \"#field-#ccd-#number\", e.g. \"1679b-8-5386\", composed of the VPHAS field offset identifier, the CCD extension number, and a unique object number."
+    },
+    {
+        "name": "primaryID",
+        "type": "string",
+        "unit": "",
+        "desc": "Identifier of the primary catalogue entry for this source.  If equal to <a href=\"#photID\">photID</a>, then this catalogue entry is the preferred observation of a unique source.  If it is different from <a href=\"#photID\">photID</a>, then the entry is a duplicate observation of a source, and the value of this column then points to the preferred alternative observation of that source."
+    },
+    {
+        "name": "is_primary",
+        "type": "boolean",
+        "unit": "",
+        "desc": "True if the entry is the preferred observation of a unique star.  Use is_primary = True if you only want one row per source."
+    },
+    {
+        "name": "nndist",
+        "type": "float",
+        "unit": "arcsec",
+        "desc": "Distance to the nearest detected object in the same frame."
+    },
+    {
+        "name": "clean",
+        "type": "boolean",
+        "unit": "",
+        "desc": "True if <a href=\"#clean_g\">clean_g</a>, <a href=\"#clean_r2\">clean_r2</a>, <a href=\"#clean_r\">clean_r</a>, <a href=\"#clean_i\">clean_i</a>, and <a href=\"#clean_ha\">clean_ha</a> are all True.  Note that <a href=\"#clean_u\">clean_u</a> is not required, because the u-band data is significantly less deep."
+    },
+    {
+        "name": "clean_u",
+        "type": "boolean",
+        "unit": "",
+        "desc": "True if the u-band detection was significant and the PSF fit reliable (<a href=\"#snr_u\">snr_u</a> &gt; 10 &amp; <a href=\"#chi_u\">chi_u</a> &lt; 1.5)."
+    },
+    {
+        "name": "u",
+        "type": "float",
+        "unit": "mag",
+        "desc": "Default u-band magnitude obtained using DAOPHOT-based PSF fitting. Calibrated in the Vega system.",
+        "form": ".3f"
+    },
+    {
+        "name": "err_u",
+        "type": "float",
+        "unit": "mag",
+        "desc": "Uncertainty for u as determined by DAOPHOT's PSF-fitting routine. Does not include systematics such as flat-fielding or zeropoint calibration errors.",
+        "form": ".3f"
+    },
+    {
+        "name": "chi_u",
+        "type": "float",
+        "unit": "mag",
+        "desc": "Goodness of the PSF fit, as determined by DAOPHOT's PSF-fitting routine. A value close to one is good.",
+        "form": ".2f"
+    },
+    {
+        "name": "error_u",
+        "type": "string",
+        "unit": "",
+        "desc": "Details of problems encountered during the PSF fitting, if any. Possible values include 'No_error', 'Off_image', 'Too_faint', and 'Bad_fit'. The magnitude values are left empty when an error occured, and hence this columns is for information only.",
+        "form": ".2f"
+    },
+    {
+        "name": "aperMag_u",
+        "type": "float",
+        "unit": "mag",
+        "desc": "r-band magnitude obtained using aperture photometry. Calibrated in the Vega system. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+    },
+    {
+        "name": "aperMagErr_u",
+        "type": "float",
+        "unit": "mag",
+        "desc": "Uncertainty in the aperture magnitude. Does not include systematics such as flat-fielding and zeropoint calibration errors, or any errors due to crowding.",
+        "form": ".2f"
+    },
+    {
+        "name": "snr_u",
+        "type": "float",
+        "unit": "mag",
+        "desc": "Signal-to-noise ratio of the flux in the fwhm-sized aperture, relative to the local background measure.",
+        "form": ".2f"
+    },
+    {
+        "name": "magLim_u",
+        "type": "float",
+        "unit": "mag",
+        "desc": "The magnitude a SNR=3 source would be expected to have at this position.",
+        "form": ".2f"
+    },
+    {
+        "name": "psffwhm_u",
+        "type": "float",
+        "unit": "arcsec",
+        "desc": "Full Width at Half Maximum (FWHM) of the Point Spread Function (PSF) in the CCD frame.",
+        "form": ".1f"
+    },
+    {
+        "name": "mjd_u",
+        "type": "double",
+        "unit": "days",
+        "desc": "Modified Julian Date at the start of the exposure."
+    },
+    {
+        "name": "x_u",
+        "type": "float",
+        "unit": "pixels",
+        "desc": "Pixel coordinate of the source in the coordinate system of the CCD.",
+        "form": ".2f"
+    },
+    {
+        "name": "x_y",
+        "type": "float",
+        "unit": "pixels",
+        "desc": "Pixel coordinate of the source in the coordinate system of the CCD.",
+        "form": ".2f"
+    },
+    {
+        "name": "detectionID_u",
+        "type": "string",
+        "unit": "",
+        "desc": "Unique identifier of the detection in the format \"#night-#exposure-#ccd-#number\", for example \"20120429-00089-8-5386\"."
+    },
+    {
+        "name": "field",
+        "type": "string",
+        "unit": "",
+        "desc": "VPHAS field offset identifier, e.g. \"0001a\"."
+    },
+    {
+        "name": "ccd",
+        "type": "int",
+        "unit": "",
+        "desc": "OmegaCAM CCD, identified by the extension number in the FITS files that the instrument produces."
+    }
+]

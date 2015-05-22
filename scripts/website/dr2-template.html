@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+        
+    <!-- Crafted with love by Geert Barentsen -->
+    <!--begin inc/head.html-->
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="The VST/OmegaCAM Photometric H-Alpha Survey (VPHAS+) is imaging the Southern Milky Way in visible light using the ESO VLT Survey Telescope (VST) in Chile.">
+    <meta name="author" content="VPHAS+ team">
+    <link rel="shortcut icon" href="/favicon.ico">
+
+    <link href="http://www.vphas.eu/assets/css/bootstrap.min.css" rel="stylesheet">
+    <link href="http://www.vphas.eu/assets/css/bootstrap-theme.min.css" rel="stylesheet">
+    <link href="http://www.vphas.eu/assets/css/font-awesome.min.css" rel="stylesheet">
+    <link href="http://www.vphas.eu/assets/css/vphas.css" rel="stylesheet">
+
+    <!-- HTML5 shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+      <script src="https://oss.maxcdn.com/libs/respond.js/1.4.2/respond.min.js"></script>
+    <![endif]-->
+    <!--end inc/head.html-->
+
+    <title>VPHAS+: Data</title>
+  </head>
+  <body>
+    
+    <!--begin inc/navbar.html-->
+    <div class="container">
+      <div class="navbar navbar-default" role="navigation">
+        <div class="container-fluid">
+          <div class="navbar-header">
+            <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+              <span class="sr-only">Toggle navigation</span>
+              <span class="icon-bar"></span>
+              <span class="icon-bar"></span>
+              <span class="icon-bar"></span>
+            </button>
+            <a class="navbar-brand" href="/">
+              <img src='http://www.vphas.eu/assets/images/vphas.png' alt='VPHAS+ logo' class="img-responsive"/>
+            </a>
+          </div>
+          <div class="navbar-collapse collapse">
+            <ul class="nav navbar-nav navbar-right">
+              <li><a href="/">Home</a></li>
+              <li><a href="/survey.shtml">Survey</a></li>
+              <li><a href="/science.shtml">Science</a></li>
+              <li><a href="/data.shtml">Data</a></li>
+              <li><a href="/gallery.shtml">Gallery</a></li>
+              <li><a href="/publications.shtml">Publications</a></li>
+              <li><a href="/people.shtml">People</a></li>
+            </ul>
+          </div><!--/.nav-collapse -->
+        </div><!--/.container-fluid -->
+      </div>
+    </div>
+    <!--end inc/navbar.html-->
+
+    <div class="container">
+    <!-- CONTENT STARTS HERE -->
+
+  <div class="row">
+
+
+      <div class="span9">
+
+      <div class="page-header">
+        <h1>
+          The VPHAS+ Point Source Catalogue
+          <sup style="color:#aa0000; font-weight:bold;">preview</sup>
+        </h1>
+      </div>
+
+      <div class="alert alert-error">
+        <button type="button" class="close" data-dismiss="alert">&times;</button>
+        <h4>Warning</h4>
+        The catalogues linked on this page are likely to be the final product,
+        to be made public when the accompanying paper is accepted,
+        but minor changes remain possible.
+        If you encounter a problem, please do report it to geert@barentsen.be.
+        <br /><b>Last update: {{ last_update }}</b>
+      </div>
+
+
+      <section id="description">
+        <div class="page-header">
+          <h2>Summary</h2>
+        </div>
+      
+        <p>
+          The IPHAS DR2 Source Catalogue provides r, i and 
+          H&alpha;-band photometry for 219 million unique sources,
+          observed across the Northern Galactic Plane between 2003 and 2013.
+          The catalogue is described in detail in 
+          an accompanying paper (Barentsen et al. 2014).
+          In brief, the catalogue has been constructed by cross-matching 
+          the detections from the individual bands using a maximum matching 
+          distance of 1 arcsec. All objects which were detected 
+          at at signal-to-noise ratio of 5 or better in at least one band
+          are included. The catalogue is uniformly calibrated with
+          an accuracy of 0.03 mag (rms).
+        </p> 
+
+        <p>
+          A table detailing the <a href="#columns">column definitions</a> is given below.
+        </p>    
+
+      </section>
+
+      <section id="download">
+        <div class="page-header">
+          <h2>Download</h2>
+        </div>
+
+        <p>
+          The IPHAS DR2 Source Catalogue is distributed as a series of 
+          binary FITS tables, each covering a 5x5&thinsp;deg<sup>2</sup> area.
+          At present the catalogue cannot be queried online,
+          but it will likely be made available through the Vizier
+          catalogue tool soon.
+        </p>
+
+        <p>
+          You may download all the files of the light catalogue (8&thinsp;GB) 
+          to a local directory using the following
+          <a href="http://www.gnu.org/software/wget/">wget</a> command:
+        </p>
+        
+        <pre>wget -c -r -np -nH --cut-dirs=3 --accept=fits.gz http://stri-cluster.herts.ac.uk/~gb/iphas-dr2-catalogue/light-compressed/</pre>
+
+        <p>
+          And to obtain the full catalogue (50&thinsp;GB):
+        </p>
+        
+        <pre>wget -c -r -np -nH --cut-dirs=3 --accept=fits.gz http://stri-cluster.herts.ac.uk/~gb/iphas-dr2-catalogue/full-compressed/</pre>
+        
+        <br />
+        
+        <p>
+          You may also download individual 5x5&thinsp;deg<sup>2</sup> tiles using the links in the table below:
+        </p>
+
+        <table class="table table-condensed iphas-download">
+          <thead>
+            <tr>
+              <td>Gal. Lon.</td>
+              <td>Gal. Lat.</td>
+              <td>
+                Download (XX columns)
+              </td>
+            </tr>
+          </thead>
+          <tbody>
+
+          {% for lon in range(25, 220, 5) %}
+            <tr>
+              <td rowspan="2">
+                {{ lon }}&deg;&thinsp;&le;&thinsp;<i>l</i>&thinsp;&lt;&thinsp;{{ lon+5 }}&deg;
+              </td>
+              <td>
+                <i>b</i>&thinsp;&lt;&thinsp;0&deg;
+              </td>
+              <td>
+                <a href="http://{{ host+dir_full }}/iphas-dr2-{{ '%03d'|format(lon) }}a.fits.gz">
+                  vphas-dr2-{{ '%03d'|format(lon) }}a.fits.gz
+                </a> (<small>{{ get_filesize(host, dir_full+'/iphas-dr2-'+'%03d'|format(lon)+'a.fits.gz') }}</small>)
+              </td>
+            </tr>
+
+            <tr>
+              <td>
+                <i>b</i>&thinsp;&ge;&thinsp;0&deg;
+              </td>
+              <td>
+                <a href="http://{{ host+dir_full }}/iphas-dr2-{{ '%03d'|format(lon) }}b.fits.gz">
+                  vphas-dr2-{{ '%03d'|format(lon) }}b.fits.gz
+                </a> (<small>{{ get_filesize(host, dir_full+'/iphas-dr2-'+'%03d'|format(lon)+'b.fits.gz') }}</small>)
+              </td>
+            </tr>
+          {% endfor %}
+  
+          </tbody>
+        </table>
+      </section>
+      
+
+      <section id="columns">
+        <div class="page-header">
+          <h2>Column definitions</h2>
+        </div>
+
+        <table class="table table-striped iphas-columns">
+          <thead>
+            <tr><th>Column</th><th>Type</th><th>Unit</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+          {% for col in columns %}
+            <tr id="{{ col.name }}">
+              <td><b>{{ col.name }}</b></td>
+              <td>{{ col.type }}</td>
+              <td>{{ col.unit }}</td>
+              <td>{{ col.desc }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+
+      </section>
+
+      <section id="source">
+        <div class="page-header">
+          <h2>Source code</h2>
+        </div>
+        <p>
+          In the spirit of reproducibility,
+          the source code that was used to generate
+          the catalogue is made available on GitHub:
+        </p>
+        <p>
+          <a href="https://www.github.com/barentsen/surveytools">https://www.github.com/barentsen/surveytools</a>
+        </p>
+      </section>
+
+
+{#
+      <section id="previous">
+        <div class="page-header">
+          <h2>Older releases</h2>
+        </div>
+    
+    <h3>IPHAS Initial Data Release (IDR)</h3>
+    <p>The link below is the entry page for accessing catalogued point
+    source photometry from survey observations obtained between 2003
+    and the beginning of 2006.</p>
+    <ul>
+    <li><a href="http://idr.iphas.org/">Initial Data Release (IDR)</a></li>
+    </ul>
+    <h3>Other Useful Links</h3>
+    <ul>
+      <li><a href="http://www.ast.cam.ac.uk/ING/Astronomy/instruments/wfc/index.html">INT/WFC instrument documentation pages</a></li>
+      <li><a href="http://apm3.ast.cam.ac.uk/cgi-bin/wfs/dqc.cgi">CASU dqc interface for querying image data</a></li>
+    </ul>
+    <p>Non-consortium members can get a taste of IPHAS imaging data by
+    going to the CASU dqc interface. This can be searched by specifying just a
+    position and a search box size (other constraints can be selected
+    but are not essential). On launching a query, a new window will
+    open showing if there are imaging data available for the position specified. If there are, visitors to the page can reselect box size and request image cut-outs, which will be displayed in a further window. It is also possible to download the reduced images from this site.</p>
+  </section>
+#}
+
+</div><!-- span9 -->
+</div>
+
+    <!-- CONTENT ENDS HERE -->
+    </div><!-- /container -->
+    
+    <!--begin inc/footer.html-->
+    <footer class="footer">
+      <div class="container">
+        <p>
+          VPHAS+ is an <a href="http://www.eso.org/sci/observing/PublicSurveys/sciencePublicSurveys.html">ESO Public Survey</a> using <a href="http://www.astro-wise.org/~omegacam">OmegaCAM</a> on the <a href="http://vstportal.oacn.inaf.it/">VLT Survey Telescope</a>.
+          
+          It is the southern counterpart to <a href="http://www.iphas.org">IPHAS</a> and <a href="https://www.astro.ru.nl/uvex/">UVEX</a>.
+          <br/>
+          This website is hosted by the <a href="http://www.herts.ac.uk/research/stri/research-areas/car.html">Centre for Astrophysics Research</a>,
+          University of Hertfordshire, UK.
+        </p>
+        <p>
+          <a href="/people.shtml">Contact details</a> &nbsp;&nbsp;&middot;&nbsp;&nbsp;
+          <a href="/consortium">Consortium area</a>
+        </p>
+      </div>
+    </footer>
+
+    <!-- Le javascript -->
+    <script src="http://www.vphas.eu/assets/js/jquery.min.js"></script>
+    <script src="http://www.vphas.eu/assets/js/bootstrap.min.js"></script>
+    <script src="http://www.vphas.eu/assets/js/egaps.js"></script>
+
+    <!-- Collect visitor statistics -->
+    <script>
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+      })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+      ga('create', 'UA-69171-4', 'vphas.eu');
+      ga('send', 'pageview');
+    </script>
+
+    <!--end inc/footer.html-->
+
+  </body>
+</html>
