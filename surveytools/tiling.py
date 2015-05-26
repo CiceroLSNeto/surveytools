@@ -33,7 +33,7 @@ for band in VPHAS_BANDS:
                    'psffwhm_', 'mjd_', 'x_', 'y_', 'detectionID_']:
         RELEASE_COLUMNS.append(prefix+band)
 for extra in ['field', 'ccd']:
-RELEASE_COLUMNS.append(extra)
+    RELEASE_COLUMNS.append(extra)
 
 
 class VphasCatalogSet(object):
@@ -219,11 +219,14 @@ class VphasCatalogTile(object):
         tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
 
     def _add_blue_cols(self, tbl):
+        """Add empty columns for the Ugr data."""
         from astropy.table import MaskedColumn
+        # Prepare the column arrays
         col_nan = np.array([np.nan for i in range(len(tbl))])
-        col_false = np.array([False for i in range(len(tbl))])
         col_nullbyte = np.array(['\x00' for i in range(len(tbl))])
-        
+        col_false = np.array([False for i in range(len(tbl))])
+        col_errormsg = np.array(['No_blue_data' for i in range(len(tbl))])
+        # Now add identical empty columns for each band
         for band in ['u', 'g', 'r2']:
             for colname in ['detectionID_', 'x_', 'y_', '', 'err_', 'chi_',
                             'sharpness_', 'sky_', 'error_', 'aperMag_',
@@ -233,18 +236,21 @@ class VphasCatalogTile(object):
                 if colname == 'clean_':
                     mydtype = 'bool'
                     mydata = col_false
-                elif colname in 'detectionID_':
+                elif colname == 'detectionID_':
                     mydtype = 'str'
                     mydata = col_nullbyte
                 elif colname == 'error_':
                     mydtype = 'str'
-                    mydata = np.array(['No_blue_data' for i in range(len(tbl))])
+                    mydata = col_errormsg
                 else:
                     mydtype = 'double'
                     mydata = col_nan
+                # Note that mask=false, because we want to impose our own choice of missing values
+                # to be written to the FITS files, rather than depending on astropy's behaviour here
                 tbl[colname+band] = MaskedColumn(mydata, mask=col_false, dtype=mydtype)
-        tbl['u_g'] = col_nan
-        tbl['g_r'] = col_nan
+        # Also add the composite colour columns
+        tbl['u_g'] = MaskedColumn(col_nan, mask=col_false, dtype='double')
+        tbl['g_r'] = MaskedColumn(col_nan, mask=col_false, dtype='double')
         return tbl
 
     def concatenate(self):
