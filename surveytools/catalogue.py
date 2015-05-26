@@ -984,9 +984,9 @@ class VphasOffsetCatalogue(object):
         # Carry out the PSF photometry using the source table created above
         log.info('Now performing the photometry.')
         if 'u' in frames:
-            bandorder = ['u', 'g', 'r', 'i', 'ha', 'r2']
+            bandorder = ['u', 'g', 'r2', 'ha', 'r', 'i']
         else:  # sometimes the blue concat is missing
-            bandorder = ['r', 'i', 'ha']
+            bandorder = ['ha', 'r', 'i']
         jobs = []
         for band in bandorder:
             params = {'frame': frames[band],
@@ -1029,7 +1029,7 @@ class VphasOffsetCatalogue(object):
         merged['r_ha'] = merged['r'] - merged['ha']
         if 'u' in frames:
             merged['u_g'] = merged['u'] - merged['g']
-            merged['g_r'] = merged['g'] - merged['r2']
+            merged['g_r2'] = merged['g'] - merged['r2']
             merged['clean'] = (merged['clean_g'].filled(False) &
                                merged['clean_r2'].filled(False) &
                                merged['clean_r'].filled(False) &
