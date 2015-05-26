@@ -25,7 +25,7 @@ from .catalogue import DEFAULT_CONFIGFILE
 
 
 # Which columns do we want to keep in the final tiled catalogues?
-RELEASE_COLUMNS = ['ra', 'dec', 'u_g', 'g_r', 'r_i', 'r_ha',
+RELEASE_COLUMNS = ['ra', 'dec', 'u_g', 'g_r2', 'r_i', 'r_ha',
                    'photID', 'primaryID', 'is_primary', 'nndist', 'clean']
 for band in VPHAS_BANDS:
     for prefix in ['clean_', '', 'err_', 'chi_', 'error_',
@@ -250,7 +250,7 @@ class VphasCatalogTile(object):
                 tbl[colname+band] = MaskedColumn(mydata, mask=col_false, dtype=mydtype)
         # Also add the composite colour columns
         tbl['u_g'] = MaskedColumn(col_nan, mask=col_false, dtype='double')
-        tbl['g_r'] = MaskedColumn(col_nan, mask=col_false, dtype='double')
+        tbl['g_r2'] = MaskedColumn(col_nan, mask=col_false, dtype='double')
         return tbl
 
     def concatenate(self):
