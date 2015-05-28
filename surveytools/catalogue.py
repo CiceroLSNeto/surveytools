@@ -1001,6 +1001,11 @@ class VphasOffsetCatalogue(object):
 
         # Band-merge the tables
         merged = table.hstack(tables, metadata_conflicts='silent')
+        # Add a unique photID for each source
+        merged['photID'] = ['{}-{}-{}'.format(self.name,
+                                              ccd,
+                                              detid.rsplit('-', maxsplit=1)[1])
+                            for detid in merged['detectionID_i']]
         # Merge the coordinates into a single reference position
         astrometry_order = ['i', 'r', 'r2', 'g', 'ha', 'u']
         if 'u' not in frames:
@@ -1009,6 +1014,10 @@ class VphasOffsetCatalogue(object):
                                  for bnd in astrometry_order])
         merged['dec'] = coalesce([merged['dec_' + bnd]
                                   for bnd in astrometry_order])
+        # Add the corresponding galactic coordinates
+        galcrd = SkyCoord(merged['ra'], merged['dec'], unit='deg').galactic
+        merged['l'] = galcrd.l
+        merged['b'] = galcrd.b
         # Add columns containing the ra/dec offsets from the reference position
         for band in frames:
             if band == 'i':
