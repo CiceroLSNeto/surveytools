@@ -565,6 +565,7 @@ class VphasFrame(object):
         # The code below transforms the table into a user-friendly format
         tbl = dp.get_allstar_phot_table()
         tbl.meta['band'] = self.band
+        tbl.meta[self.band + 'zpt'] = self.zeropoint
         tbl.meta[self.band + 'PsfRms'] = psf_scatter
         tbl.meta[self.band + 'Seeing'] = VPHAS_PIXEL_SCALE * self.psf_fwhm
         tbl.meta[self.band + 'Airm'] = self.airmass
