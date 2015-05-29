@@ -93,7 +93,8 @@ class VphasCatalogTile(object):
         Note: we use galactic longitudes in the range [180, 540] to avoid
         edge issues.
         """
-        cats = Table.read(os.path.join(self.cfg['vphas']['cat_dir'], 'vphas-offsetcat-index.fits'))
+        cats = Table.read(os.path.join(self.cfg['vphas']['cat_dir'],
+                                       'vphas-offsetcat-index.fits'))
         # Add the min/max range in galactic latitude and longitude
         galcrd = [SkyCoord(cats[ra_col], cats[dec_col], unit='deg').galactic
                   for ra_col in ['ra_min', 'ra_max']
@@ -190,7 +191,6 @@ class VphasCatalogTile(object):
         """Returns an offset ccd catalogue, augmented with columns needed for seaming."""
         path = os.path.join(self.cfg['catalogue']['destdir'], filename)
         tbl = Table.read(path)
-        tbl = add_photid(tbl, filename)
         tbl['crd'] = SkyCoord(tbl['ra'], tbl['dec'], unit='deg', frame='icrs')
         # Add the "clean_count" column which details the number of bands with clean photometry
         # Add the "band_count" column which details the number of bands with psf photometry
@@ -209,7 +209,6 @@ class VphasCatalogTile(object):
     def _write_resolved_catalog(self, fn):
         path = os.path.join(self.cfg['catalogue']['destdir'], fn)
         tbl = Table.read(path)
-        tbl = add_photid(tbl, fn)
         if 'g' not in tbl.columns:
             tbl = self._add_blue_cols(tbl)
         tbl['primaryID'] = [self.primary_id_cache[photid] for photid in tbl['photID']]
@@ -266,8 +265,7 @@ class VphasCatalogTile(object):
             instring += 'in={0} '.format(fnres)
         param = {'l_min': self.l % 360, 'l_max': (self.l + self.size) % 360,
                  'b_min': self.b, 'b_max': self.b + self.size,}
-        ocmd = """'addskycoords -inunit deg -outunit deg icrs galactic ra dec l b; \
-                  select "l >= {l_min} & l < {l_max} & b >= {b_min} & b <= {b_max}"; \
+        ocmd = """'select "l >= {l_min} & l < {l_max} & b >= {b_min} & b <= {b_max}"; \
                   sort primaryID;'""".format(**param)
         destination = os.path.join(self.cfg['vphas']['tiled_cat_dir'],
                                    '{}.fits'.format(self.name))
@@ -277,14 +275,6 @@ class VphasCatalogTile(object):
         log.info(cmd)
         status = os.system(cmd)
         log.info('concat: '+str(status))
-
-
-def add_photid(tbl, filename):
-    sourceid_prefix = filename.rsplit('-', maxsplit=1)[0]
-    tbl['photID'] = ['{}-{}'.format(sourceid_prefix, detid.rsplit('-', maxsplit=1)[1])
-                     for detid in tbl['detectionID_i']]
-    return tbl
-
 
 
 def vphas_tile_merge_main(args=None):

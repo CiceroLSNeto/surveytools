@@ -1412,11 +1412,13 @@ def offset_catalogue_metadata(filename):
         for band in VPHAS_BANDS:
             try:
                 row[band + 'psfrms'] = f[1].header[(band + 'PSFRMS').upper()]
+                row[band + 'zpt'] =  f[1].header[(band + 'zpt').upper()]
                 row['n_clean_' + band] = f[1].data['clean_' + band].sum()
                 row['med_maglim_' + band] = np.nanmedian(f[1].data['magLim_' + band])
                 row['psffwhm_' + band] = f[1].data['psffwhm_' + band][0]
             except KeyError:  # band may not be in the catalogue
                 row[band + 'psfrms'] = np.nan
+                row[band + 'zpt'] = np.nan
                 row['n_clean_' + band] = np.nan
                 row['med_maglim_' + band] = np.nan
                 row['psffwhm_' + band] = np.nan
@@ -1427,16 +1429,20 @@ def offset_catalogue_metadata(filename):
 
 
 def vphas_index_offset_catalogues_main(args=None):
-    """Function called by the vphas-index-offset-catalogues command line script."""
+    """Main function of `vphas-index-offset-catalogues` command-line tool.
+
+    This will create a table detailing all the per-ccd catalogues that have
+    been created (i.e. that can be found in the destination directory on
+    the filesystem).
+    """
     import glob
     from astropy.utils.console import ProgressBar
     cfg = configparser.ConfigParser()
     cfg.read(DEFAULT_CONFIGFILE)
 
-    DESTINATION = 'vphas-offsetcat-index.fits'
+    DESTINATION = 'vphas-offsetcats.fits'
     log.info('Writing {}'.format(DESTINATION))
 
-    import multiprocessing
     pool = multiprocessing.Pool(8)
     filenames = glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))
     rows = []
