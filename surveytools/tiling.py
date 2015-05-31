@@ -32,7 +32,7 @@ for band in VPHAS_BANDS:
                    'aperMag_', 'aperMagErr_', 'snr_', 'magLim_',
                    'psffwhm_', 'mjd_', 'x_', 'y_', 'detectionID_']:
         RELEASE_COLUMNS.append(prefix+band)
-for extra in ['field', 'ccd']:
+for extra in ['field', 'ccd', 'l', 'b']:
     RELEASE_COLUMNS.append(extra)
 
 
@@ -71,14 +71,19 @@ class VphasCatalogSet(object):
 
 class VphasCatalogTile(object):
 
-    def __init__(self, l, b, size=0.5, configfile=None):
+    def __init__(self, l, b, size=0.5, name=None, configfile=None):
         # Init parameters
         if l < 180:
             l += 360
         self.l = l
         self.b = b
         self.size = size
-        self.name = 'vphas-{}-{}-{}'.format(l, b, size)
+        # The name of the tile will determine the filename
+        if name is None:
+            if size > 0.999:
+                self.name = 'vphas-l{:.0f}-b{:+.0f}'.format(l, b)
+            else:
+                self.name = 'vphas-{}-{}-{}'.format(l, b, size)
         # Read the configuration
         if configfile is None:
             configfile = DEFAULT_CONFIGFILE
@@ -140,6 +145,15 @@ class VphasCatalogTile(object):
 
     def _resolve_one(self, idx, max_distance=0.5):
         refcat_info = self.catalogset.table[idx]
+        # We only resolve if the expected output file does not already exists;
+        # this way we avoid repeating work for frames on tile edges.
+        expected_path = os.path.join(self.cfg['vphas']['resolved_cat_dir'],
+                                     refcat_info['filename'].replace('cat', 'resolved'))
+        if os.path.exists(expected_path):
+            log.debug('Skipping {}: already found {}'.format(refcat_info['filename'],
+                                                             expected_path))
+            return
+        # The frame hasn't been processed yet:
         log.debug('Now resolving {}'.format(refcat_info['filename']))
         overlap_set = self.catalogset.subset(refcat_info['ra_min'], refcat_info['ra_max'],
                                              refcat_info['dec_min'], refcat_info['dec_max'])
@@ -265,7 +279,7 @@ class VphasCatalogTile(object):
             instring += 'in={0} '.format(fnres)
         param = {'l_min': self.l % 360, 'l_max': (self.l + self.size) % 360,
                  'b_min': self.b, 'b_max': self.b + self.size,}
-        ocmd = """'select "l >= {l_min} & l < {l_max} & b >= {b_min} & b <= {b_max}"; \
+        ocmd = """'select "l >= {l_min} & l < {l_max} & b >= {b_min} & b < {b_max}"; \
                   sort primaryID;'""".format(**param)
         destination = os.path.join(self.cfg['vphas']['tiled_cat_dir'],
                                    '{}.fits'.format(self.name))
