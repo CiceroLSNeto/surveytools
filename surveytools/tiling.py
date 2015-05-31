@@ -94,7 +94,7 @@ class VphasCatalogTile(object):
         edge issues.
         """
         cats = Table.read(os.path.join(self.cfg['vphas']['cat_dir'],
-                                       'vphas-offsetcat-index.fits'))
+                                       'vphas-offsetcats.fits'))
         # Add the min/max range in galactic latitude and longitude
         galcrd = [SkyCoord(cats[ra_col], cats[dec_col], unit='deg').galactic
                   for ra_col in ['ra_min', 'ra_max']
