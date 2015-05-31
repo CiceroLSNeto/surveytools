@@ -26,7 +26,7 @@ from .catalogue import DEFAULT_CONFIGFILE
 
 # Which columns do we want to keep in the final tiled catalogues?
 RELEASE_COLUMNS = ['ra', 'dec', 'u_g', 'g_r2', 'r_i', 'r_ha',
-                   'photID', 'primaryID', 'is_primary', 'nndist', 'clean']
+                   'photID', 'primaryID', 'is_primary', 'nObs', 'nndist', 'clean']
 for band in VPHAS_BANDS:
     for prefix in ['clean_', '', 'err_', 'chi_', 'error_',
                    'aperMag_', 'aperMagErr_', 'snr_', 'magLim_',
@@ -184,22 +184,31 @@ class VphasCatalogTile(object):
             clean_counts.update(zip(overlap_cat['photID'], overlap_cat['clean_count']))
 
         # Now determine the primaryIDs
+        nobs = {}
         for sourceid, photid_candidates in candidates.items():
+            # The code below decides the winner of the primaryID fame
+            # First, we collect the data on which the decision is based:
+            # number of bands in which the source is detected:
             bandcounts = [band_counts[photid] for photid in photid_candidates]
+            # number of bands in which the source is clean:
             cleancounts = [clean_counts[photid] for photid in photid_candidates]
-
+            # If a candidate has more bands than the others, it wins,
+            # otherwise the candidates with the highest number of clean bands wins.
             bandcount_mask = bandcounts == np.max(bandcounts)
             if bandcount_mask.sum() > 1:
                 winner_arg = np.argmax(cleancounts)
             else:
                 winner_arg = np.argmax(bandcount_mask)
             myprimary = photid_candidates[winner_arg]
-           
+            # Store the winner in the cache for all the candidates
             for photid in photid_candidates:
+                # But avoid conflicting a previous decision!
                 if photid not in self.primary_id_cache:
                     self.primary_id_cache[photid] = myprimary
+            # Keep a record of the number of alternatives available
+            nobs[sourceid] = len(photid_candidates)
 
-        self._write_resolved_catalog(refcat_info['filename'])
+        self._write_resolved_catalog(refcat_info['filename'], nobs)
 
     def _get_catalog_data(self, filename):
         """Returns an offset ccd catalogue, augmented with columns needed for seaming."""
@@ -220,13 +229,14 @@ class VphasCatalogTile(object):
         tbl['band_count'] = band_count
         return tbl
 
-    def _write_resolved_catalog(self, fn):
+    def _write_resolved_catalog(self, fn, nobs):
         path = os.path.join(self.cfg['catalogue']['destdir'], fn)
         tbl = Table.read(path)
         if 'g' not in tbl.columns:
             tbl = self._add_blue_cols(tbl)
         tbl['primaryID'] = [self.primary_id_cache[photid] for photid in tbl['photID']]
         tbl['is_primary'] = tbl['photID'] == tbl['primaryID']
+        tbl['nObs'] = [nobs[photid] for photid in tbl['photID']]
         destination = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
         log.debug('Writing {}'.format(destination))
         tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
