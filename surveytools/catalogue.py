@@ -1438,7 +1438,8 @@ def vphas_index_offset_catalogues_main(args=None):
     import glob
     from astropy.utils.console import ProgressBar
     cfg = configparser.ConfigParser()
-    cfg.read(DEFAULT_CONFIGFILE)
+    myconfigfile = '/car-data/gb/vphas/psfcat/config.ini'
+    cfg.read(myconfigfile)
 
     DESTINATION = 'vphas-offsetcats.fits'
     log.info('Writing {}'.format(DESTINATION))

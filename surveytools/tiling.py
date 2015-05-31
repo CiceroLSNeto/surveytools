@@ -81,9 +81,9 @@ class VphasCatalogTile(object):
         # The name of the tile will determine the filename
         if name is None:
             if size > 0.999:
-                self.name = 'vphas-l{:.0f}-b{:+.0f}'.format(l, b)
+                self.name = 'vphas-l{:.0f}-b{:+.0f}'.format(l % 360, b)
             else:
-                self.name = 'vphas-{}-{}-{}'.format(l, b, size)
+                self.name = 'vphas-{}-{}-{}'.format(l % 360, b, size)
         # Read the configuration
         if configfile is None:
             configfile = DEFAULT_CONFIGFILE
@@ -129,8 +129,11 @@ class VphasCatalogTile(object):
 
 
     def create(self):
-        self.resolve()
-        self.concatenate()
+        if len(self.catalogset.table) < 1:
+            log.warning('Tile is empty.')
+        else:
+            self.resolve()
+            self.concatenate()
 
     def resolve(self):
         # Ensure the output dir exists
