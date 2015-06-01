@@ -244,9 +244,11 @@ class VphasCatalogTile(object):
         destination = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
         log.debug('Writing {}'.format(destination))
         # Hack: use sensible types
+        # this should have been done in catalogue.py, but due to time pressure
+        # (i.e. to avoid re-generating all catalogues) we fix the data types here
         for col in RELEASE_COLUMNS:
-            if (col not in ['ra', 'dec', 'is_primary', 'nObs', 'field', 'ccd', 'l', 'b']
-                and not col.endswith('ID') 
+            if (col not in ['ra', 'dec', 'photID', 'primaryID', 'is_primary', 'nObs', 'field', 'ccd', 'l', 'b']
+                and not col.startswith('detectionID') 
                 and not col.startswith('clean')
                 and not col.startswith('error')):
                 tbl[col] = tbl[col].astype('float32')
