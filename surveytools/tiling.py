@@ -248,16 +248,17 @@ class VphasCatalogTile(object):
         # (i.e. to avoid re-generating all catalogues) we fix the data types here
         for col in RELEASE_COLUMNS:
             if (col not in ['ra', 'dec', 'photID', 'primaryID', 'is_primary', 'nObs', 'field', 'ccd', 'l', 'b']
+                and not col.startswith('mjd')
                 and not col.startswith('detectionID') 
                 and not col.startswith('clean')
                 and not col.startswith('error')):
-                tbl[col] = tbl[col].astype('float32')
+                tbl.columns[col] = tbl[col].astype('float32')
         for band in VPHAS_BANDS:
-            tbl['detectionID_' + band] = tbl['detectionID_' + band].astype('23a')
-            tbl['error_' + band] = tbl['error_' + band].astype('12a')
-        tbl['photID'] = tbl['photID'].astype('14a')
-        tbl['field'] = tbl['field'].astype('5a')
-        tbl['ccd'] = tbl['ccd'].astype('uint8')
+            tbl.columns['detectionID_' + band] = tbl['detectionID_' + band].astype('23a')
+            tbl.columns['error_' + band] = tbl['error_' + band].astype('12a')
+        tbl.columns['photID'] = tbl['photID'].astype('14a')
+        tbl.columns['field'] = tbl['field'].astype('5a')
+        tbl.columns['ccd'] = tbl['ccd'].astype('uint8')
         # Finally, write to disk
         tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
 
