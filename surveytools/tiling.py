@@ -257,7 +257,7 @@ class VphasCatalogTile(object):
             tbl['error_' + band] = tbl['error_' + band].astype('12a')
         tbl['photID'] = tbl['photID'].astype('14a')
         tbl['field'] = tbl['field'].astype('5a')
-        tbl['ccd'] = tbl['ccd'].astype('unit8')
+        tbl['ccd'] = tbl['ccd'].astype('uint8')
         # Finally, write to disk
         tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
 
