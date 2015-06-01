@@ -247,10 +247,12 @@ class VphasCatalogTile(object):
         for col in RELEASE_COLUMNS:
             if (col not in ['ra', 'dec', 'is_primary', 'nObs', 'field', 'ccd', 'l', 'b']
                 and not col.endswith('ID') 
-                and not col.startswith('clean')):
+                and not col.startswith('clean')
+                and not col.startswith('error')):
                 tbl[col] = tbl[col].astype('float32')
         for band in VPHAS_BANDS:
             tbl['detectionID_' + band] = tbl['detectionID_' + band].astype('23a')
+            tbl['error_' + band] = tbl['error_' + band].astype('12a')
         tbl['photID'] = tbl['photID'].astype('14a')
         tbl['field'] = tbl['field'].astype('5a')
         tbl['ccd'] = tbl['ccd'].astype('unit8')
