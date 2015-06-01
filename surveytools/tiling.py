@@ -237,8 +237,9 @@ class VphasCatalogTile(object):
         tbl = Table.read(path)
         if 'g' not in tbl.columns:
             tbl = self._add_blue_cols(tbl)
-        tbl['primaryID'] = Column([self.primary_id_cache[photid] for photid in tbl['photID']], dtype='14a')
-        tbl['is_primary'] = tbl['photID'] == tbl['primaryID']
+        primaryids = np.array([self.primary_id_cache[photid] for photid in tbl['photID']])
+        tbl['primaryID'] = Column(primaryids, dtype='14a')
+        tbl['is_primary'] = tbl['photID'] == primaryids
         tbl['nObs'] = Column([nobs[photid] for photid in tbl['photID']], dtype='uint8')
         destination = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
         log.debug('Writing {}'.format(destination))
@@ -248,7 +249,10 @@ class VphasCatalogTile(object):
                 and not col.endswith('ID') 
                 and not col.startswith('clean')):
                 tbl[col] = tbl[col].astype('float32')
-        tbl['field'] = tbl['field'].astype('a5')
+        for band in VPHAS_BANDS:
+            tbl['detectionID_' + band] = tbl['detectionID_' + band].astype('23a')
+        tbl['photID'] = tbl['photID'].astype('14a')
+        tbl['field'] = tbl['field'].astype('5a')
         tbl['ccd'] = tbl['ccd'].astype('unit8')
         # Finally, write to disk
         tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
