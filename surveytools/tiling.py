@@ -16,7 +16,7 @@ from shapely.geometry.polygon import LinearRing, Polygon
 
 from astropy import log
 from astropy import units as u
-from astropy.table import Table, vstack
+from astropy.table import Column, Table, vstack
 from astropy.coordinates import SkyCoord
 from astropy.utils.console import ProgressBar
 
@@ -237,11 +237,20 @@ class VphasCatalogTile(object):
         tbl = Table.read(path)
         if 'g' not in tbl.columns:
             tbl = self._add_blue_cols(tbl)
-        tbl['primaryID'] = [self.primary_id_cache[photid] for photid in tbl['photID']]
+        tbl['primaryID'] = Column([self.primary_id_cache[photid] for photid in tbl['photID']], dtype='14a')
         tbl['is_primary'] = tbl['photID'] == tbl['primaryID']
-        tbl['nObs'] = [nobs[photid] for photid in tbl['photID']]
+        tbl['nObs'] = Column([nobs[photid] for photid in tbl['photID']], dtype='uint8')
         destination = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
         log.debug('Writing {}'.format(destination))
+        # Hack: use sensible types
+        for col in RELEASE_COLUMNS:
+            if (col not in ['ra', 'dec', 'is_primary', 'nObs', 'field', 'ccd', 'l', 'b']
+                and not col.endswith('ID') 
+                and not col.startswith('clean')):
+                tbl[col] = tbl[col].astype('float32')
+        tbl['field'] = tbl['field'].astype('a5')
+        tbl['ccd'] = tbl['ccd'].astype('unit8')
+        # Finally, write to disk
         tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
 
     def _add_blue_cols(self, tbl):
@@ -263,20 +272,20 @@ class VphasCatalogTile(object):
                     mydtype = 'bool'
                     mydata = col_false
                 elif colname == 'detectionID_':
-                    mydtype = 'str'
+                    mydtype = '23a'
                     mydata = col_nullbyte
                 elif colname == 'error_':
-                    mydtype = 'str'
+                    mydtype = '12a'
                     mydata = col_errormsg
                 else:
-                    mydtype = 'double'
+                    mydtype = 'float32'
                     mydata = col_nan
                 # Note that mask=false, because we want to impose our own choice of missing values
                 # to be written to the FITS files, rather than depending on astropy's behaviour here
                 tbl[colname+band] = MaskedColumn(mydata, mask=col_false, dtype=mydtype)
         # Also add the composite colour columns
-        tbl['u_g'] = MaskedColumn(col_nan, mask=col_false, dtype='double')
-        tbl['g_r2'] = MaskedColumn(col_nan, mask=col_false, dtype='double')
+        tbl['u_g'] = MaskedColumn(col_nan, mask=col_false, dtype='float32')
+        tbl['g_r2'] = MaskedColumn(col_nan, mask=col_false, dtype='float32')
         return tbl
 
     def concatenate(self):
