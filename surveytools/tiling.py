@@ -263,7 +263,10 @@ class VphasCatalogTile(object):
         tbl = Table(tbl, copy=False)  # necessary!
         # file may have been written by another process in meanwhile
         if not os.path.exists(destination):
-            tbl[RELEASE_COLUMNS].write(destination)
+            try:
+                tbl[RELEASE_COLUMNS].write(destination)
+            except OSError:
+                pass  # dont let the script crash if the file was written by a competing process in meanwhile
         else:
             log.warning('Not overwriting ' + destination)
         
