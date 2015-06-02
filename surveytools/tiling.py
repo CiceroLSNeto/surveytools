@@ -338,7 +338,7 @@ class VphasCatalogTile(object):
         destination = os.path.join(self.cfg['vphas']['tiled_cat_dir'],
                                    '{}.fits'.format(self.name))
         log.info('Writing {}'.format(destination))
-        cmd = '{} tcat {} countrows=true lazy=true ocmd={} ofmt=fits-basic out={}'.format(STILTS, instring, ocmd, destination)
+        cmd = 'sleep 2; {} tcat {} countrows=true lazy=true ocmd={} ofmt=fits-basic out={}'.format(STILTS, instring, ocmd, destination)
         #ofmt=colfits-basic
         log.info(cmd)
         status = os.system(cmd)
