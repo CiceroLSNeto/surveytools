@@ -261,8 +261,12 @@ class VphasCatalogTile(object):
         tbl.columns['ccd'] = tbl['ccd'].astype('uint8')
         # Finally, write to disk
         tbl = Table(tbl, copy=False)  # necessary!
-        tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
-
+        # file may have been written by another process in meanwhile
+        if not os.path.exists(destination):
+            tbl[RELEASE_COLUMNS].write(destination)
+        else:
+            log.warning('Not overwriting ' + destination)
+        
     def _add_blue_cols(self, tbl):
         """Add empty columns for the Ugr data."""
         from astropy.table import MaskedColumn
@@ -287,6 +291,9 @@ class VphasCatalogTile(object):
                 elif colname == 'error_':
                     mydtype = '12a'
                     mydata = col_errormsg
+                elif colname == 'mjd_':
+                    mydtype = 'float64'
+                    mydata = col_nan
                 else:
                     mydtype = 'float32'
                     mydata = col_nan
