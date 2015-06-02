@@ -260,6 +260,7 @@ class VphasCatalogTile(object):
         tbl.columns['field'] = tbl['field'].astype('5a')
         tbl.columns['ccd'] = tbl['ccd'].astype('uint8')
         # Finally, write to disk
+        tbl = Table(tbl, copy=False)  # necessary!
         tbl[RELEASE_COLUMNS].write(destination, overwrite=True)
 
     def _add_blue_cols(self, tbl):
