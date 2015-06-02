@@ -25,8 +25,8 @@ from .catalogue import DEFAULT_CONFIGFILE
 
 
 # Which columns do we want to keep in the final tiled catalogues?
-RELEASE_COLUMNS = ['ra', 'dec', 'u_g', 'g_r2', 'r_i', 'r_ha',
-                   'photID', 'primaryID', 'is_primary', 'nObs', 'nndist', 'clean']
+RELEASE_COLUMNS = ['RAJ2000', 'DEJ2000', 'u_g', 'g_r2', 'r_i', 'r_ha',
+                   'photID', 'primaryID', 'primary_source', 'nObs', 'nndist', 'clean']
 for band in VPHAS_BANDS:
     for prefix in ['clean_', '', 'err_', 'chi_', 'error_',
                    'aperMag_', 'aperMagErr_', 'snr_', 'magLim_',
@@ -239,7 +239,7 @@ class VphasCatalogTile(object):
             tbl = self._add_blue_cols(tbl)
         primaryids = np.array([self.primary_id_cache[photid] for photid in tbl['photID']])
         tbl['primaryID'] = Column(primaryids, dtype='14a')
-        tbl['is_primary'] = tbl['photID'] == primaryids
+        tbl['primary_source'] = tbl['photID'] == primaryids
         tbl['nObs'] = Column([nobs[photid] for photid in tbl['photID']], dtype='uint8')
         destination = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
         log.debug('Writing {}'.format(destination))
@@ -247,7 +247,7 @@ class VphasCatalogTile(object):
         # this should have been done in catalogue.py, but due to time pressure
         # (i.e. to avoid re-generating all catalogues) we fix the data types here
         for col in RELEASE_COLUMNS:
-            if (col not in ['ra', 'dec', 'photID', 'primaryID', 'is_primary', 'nObs', 'field', 'ccd', 'l', 'b']
+            if (col not in ['ra', 'dec', 'photID', 'primaryID', 'primary_source', 'nObs', 'field', 'ccd', 'l', 'b']
                 and not col.startswith('mjd')
                 and not col.startswith('detectionID') 
                 and not col.startswith('clean')
@@ -259,6 +259,12 @@ class VphasCatalogTile(object):
         tbl.columns['photID'] = tbl['photID'].astype('14a')
         tbl.columns['field'] = tbl['field'].astype('5a')
         tbl.columns['ccd'] = tbl['ccd'].astype('uint8')
+        # Hack: last-minute changes to comply with the ESO standard
+        tbl['ra'].name = 'RAJ2000'
+        tbl['dec'].name = 'DEJ2000'
+        # Add IAU names -- no, too slow!
+        #crd = SkyCoord(tbl['RAJ2000'], tbl['DEJ2000'], unit='deg')
+        #[crd[i].ra.to_string(unit='hour', sep='', precision=2, pad=True)+crd[i].dec.to_string(unit='deg', sep='', precision=2, pad=True, alwayssign=True) for i in range(len(crd))]
         # Finally, write to disk
         tbl = Table(tbl, copy=False)  # necessary!
         # file may have been written by another process in meanwhile
@@ -322,11 +328,20 @@ class VphasCatalogTile(object):
         param = {'l_min': self.l % 360, 'l_max': (self.l + self.size) % 360,
                  'b_min': self.b, 'b_max': self.b + self.size,}
         ocmd = """'select "l >= {l_min} & l < {l_max} & b >= {b_min} & b < {b_max}"; \
-                  sort primaryID;'""".format(**param)
+                   addcol -before RAJ2000 \
+                          -desc "Source designation (JHHMMSS.ss+DDMMSS.s)." \
+                          name \
+                          "concat(\\"VPHASDR2 J\\", 
+                                            replaceAll(degreesToHms(RAJ2000, 2),
+                                                       \\":\\", \\"\\"), 
+                                            replaceAll(degreesToDms(DEJ2000, 2),
+                                                       \\":\\", \\"\\")
+                                            )"; \
+                  sort name;'""".format(**param)
         destination = os.path.join(self.cfg['vphas']['tiled_cat_dir'],
                                    '{}.fits'.format(self.name))
         log.info('Writing {}'.format(destination))
-        cmd = '{} tcat {} countrows=true lazy=true ocmd={} ofmt=fits out={}'.format(STILTS, instring, ocmd, destination)
+        cmd = 'sleep 2; {} tcat {} countrows=true lazy=true ocmd={} ofmt=fits-basic out={}'.format(STILTS, instring, ocmd, destination)
         #ofmt=colfits-basic
         log.info(cmd)
         status = os.system(cmd)
