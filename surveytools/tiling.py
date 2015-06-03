@@ -26,11 +26,11 @@ from .catalogue import DEFAULT_CONFIGFILE
 
 # Which columns do we want to keep in the final tiled catalogues?
 RELEASE_COLUMNS = ['RAJ2000', 'DEJ2000', 'u_g', 'g_r2', 'r_i', 'r_ha',
-                   'photID', 'primaryID', 'primary_source', 'nObs', 'nndist', 'clean']
+                   'sourceID', 'primaryID', 'primary_source', 'nObs', 'nndist', 'clean']
 for band in VPHAS_BANDS:
-    for prefix in ['clean_', '', 'err_', 'chi_', 'error_',
+    for prefix in ['clean_', '', 'err_', 'chi_', 'warning_',
                    'aperMag_', 'aperMagErr_', 'snr_', 'magLim_',
-                   'psffwhm_', 'mjd_', 'x_', 'y_', 'detectionID_']:
+                   'psffwhm_', 'mjd_', 'detectionID_']:
         RELEASE_COLUMNS.append(prefix+band)
 for extra in ['field', 'ccd', 'l', 'b']:
     RELEASE_COLUMNS.append(extra)
@@ -251,20 +251,17 @@ class VphasCatalogTile(object):
                 and not col.startswith('mjd')
                 and not col.startswith('detectionID') 
                 and not col.startswith('clean')
-                and not col.startswith('error')):
+                and not col.startswith('warning')):
                 tbl.columns[col] = tbl[col].astype('float32')
         for band in VPHAS_BANDS:
             tbl.columns['detectionID_' + band] = tbl['detectionID_' + band].astype('23a')
-            tbl.columns['error_' + band] = tbl['error_' + band].astype('12a')
-        tbl.columns['photID'] = tbl['photID'].astype('14a')
+            tbl.columns['warning_' + band] = tbl['error_' + band].astype('12a')
+        tbl.columns['sourceID'] = tbl['photID'].astype('14a')
         tbl.columns['field'] = tbl['field'].astype('5a')
         tbl.columns['ccd'] = tbl['ccd'].astype('uint8')
         # Hack: last-minute changes to comply with the ESO standard
         tbl['ra'].name = 'RAJ2000'
         tbl['dec'].name = 'DEJ2000'
-        # Add IAU names -- no, too slow!
-        #crd = SkyCoord(tbl['RAJ2000'], tbl['DEJ2000'], unit='deg')
-        #[crd[i].ra.to_string(unit='hour', sep='', precision=2, pad=True)+crd[i].dec.to_string(unit='deg', sep='', precision=2, pad=True, alwayssign=True) for i in range(len(crd))]
         # Finally, write to disk
         tbl = Table(tbl, copy=False)  # necessary!
         # file may have been written by another process in meanwhile
@@ -286,8 +283,8 @@ class VphasCatalogTile(object):
         col_errormsg = np.array(['No_blue_data' for i in range(len(tbl))])
         # Now add identical empty columns for each band
         for band in ['u', 'g', 'r2']:
-            for colname in ['detectionID_', 'x_', 'y_', '', 'err_', 'chi_',
-                            'sharpness_', 'sky_', 'error_', 'aperMag_',
+            for colname in ['detectionID_', '', 'err_', 'chi_',
+                            'sharpness_', 'sky_', 'warning_', 'aperMag_',
                             'aperMagErr_', 'snr_', 'magLim_', 'psffwhm_',
                             'airmass_', 'mjd_', 'pixelShift_', 'clean_',
                             'offsetRa_', 'offsetDec_']:
@@ -297,7 +294,7 @@ class VphasCatalogTile(object):
                 elif colname == 'detectionID_':
                     mydtype = '23a'
                     mydata = col_nullbyte
-                elif colname == 'error_':
+                elif colname == 'warning_':
                     mydtype = '12a'
                     mydata = col_errormsg
                 elif colname == 'mjd_':
