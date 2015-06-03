@@ -81,9 +81,9 @@ class VphasCatalogTile(object):
         # The name of the tile will determine the filename
         if name is None:
             if size > 0.999:
-                self.name = 'vphas-l{:.0f}-b{:+.0f}'.format(l % 360, b)
+                self.name = 'vphas_l{:.0f}_b{:+.0f}'.format(l % 360, b)
             else:
-                self.name = 'vphas-{}-{}-{}'.format(l % 360, b, size)
+                self.name = 'vphas_{}_{}_{}'.format(l % 360, b, size)
         # Read the configuration
         if configfile is None:
             configfile = DEFAULT_CONFIGFILE
@@ -269,7 +269,7 @@ class VphasCatalogTile(object):
             try:
                 tbl[RELEASE_COLUMNS].write(destination)
             except OSError:
-                pass  # dont let the script crash if the file was written by a competing process in meanwhile
+                pass  # dont let the script crash if the file was written by a competing process
         else:
             log.warning('Not overwriting ' + destination)
         
