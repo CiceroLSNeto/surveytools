@@ -1,0 +1,879 @@
+[{
+    "name": {
+        "tcomm": "Position-based source name. Not a unique identifier.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id",
+        "type": "string",
+        "desc": "Position-based source name in the sexagesimal form: \"VPHAS-DR2 JHHMMSS.ss+DDMMSS.s\". VPHAS-DR2 indicates the survey and data release, while J indicates that the position is J2000 equatorial."
+        },
+    "RAJ2000": {
+        "tcomm": "Right Ascension in decimal degrees (J2000).",
+        "tdisp": "F9.5",
+        "tunit": "deg",
+        "tucd": "pos.eq.ra;meta.main",
+        "type": "double",
+        "desc": "Right Ascension in decimal degrees (J2000) with respect to the 2MASS PSC reference frame, which is consistent with ICRS to within 0.1 arcsec.  The coordinate given is obtained from the astrometric measurement in the i-band exposure. If the source is undetected in i, then the r, r2, g, ha, or u coordinate is given (bands are listed in order of preference).",
+        "form": ".5f",
+        "suff": "°"
+        },
+    "DEJ2000": {
+        "tcomm": "Declination in decimal degrees (J2000).",
+        "tdisp": "F9.5",
+        "tunit": "deg",
+        "tucd": "pos.eq.dec;meta.main",
+        "type": "double",
+        "desc": "Declination in decimal degrees (J2000). See comments above.",
+        "form": ".5f",
+        "suff": "°"
+        },
+    "sourceID": {
+        "tcomm": "Unique VPHAS source identifier in the format field-extension-number.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id;meta.main",        
+        "type": "string",
+        "desc": "Unique VPHAS source identifier in the format \"#field-#extension-#number\", e.g. \"1679b-8-5386\", composed of the VPHAS field offset identifier, the CCD extension number, and a unique object number."
+        },
+    "primaryID": {
+        "tcomm": "sourceID of the preferred catalogue entry for this source.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id.parent",  
+        "type": "string",
+        "desc": "sourceID of the preferred catalogue entry for this source.  If equal to <a href=\"#sourceID\">sourceID</a>, then this entry is the preferred observation of a unique source.  If it is different from sourceID, then the entry is an duplicate observation of a source and this column points to the preferred alternative."
+        },
+    "primary_source": {
+        "tcomm": "True if the entry is the preferred observation of a unique source.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code", 
+        "type": "boolean",
+        "desc": "True if the entry is the preferred observation of a unique source.  Use is_primary = True if you only want one row per source."
+        },
+    "nObs": {
+        "tcomm": "Number of observations of this source in the survey.",
+        "tdisp": "I1.1",
+        "tunit": "",
+        "tucd": "meta.number",
+        "type": "short",
+        "desc": "Number of observations of this source in the survey."
+        },    
+    "clean": {
+        "tcomm": "True if clean_g, clean_r2, clean_ha, clean_r and clean_i are true.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual",
+        "type": "boolean",
+        "desc": "True if <a href=\"#clean_g\">clean_g</a>, <a href=\"#clean_r2\">clean_r2</a>, <a href=\"#clean_r\">clean_r</a>, <a href=\"#clean_i\">clean_i</a>, and <a href=\"#clean_ha\">clean_ha</a> are all True.  Note that <a href=\"#clean_u\">clean_u</a> is not required, because the u-band data is significantly less deep."
+    },
+    "u_g": {
+        "tcomm": "(u - g) colour index, formed by subtracting columns u and g.",
+        "tdisp": "F3.2",
+        "tunit": "mag",
+        "tucd": "phot.color;em.opt.U;em.opt.B",
+        "type": "float",
+        "desc": "(u - g) colour index, formed by subtracting columns <a href=\"#u\">u</a> and <a href=\"#g\">g</a>. To obtain the uncertainty, take the root of the sum of the squares of columns <a href=\"#err_u\">err_u</a> and <a href=\"#err_g\">err_g</a>.",
+        "form": ".2f"
+        },
+    "g_r2": {
+        "tcomm": "(g - r2) colour index, formed by subtracting columns g and r2.",
+        "tdisp": "F3.2",
+        "tunit": "mag",
+        "tucd": "phot.color;em.opt.B;em.opt.R",        
+        "type": "float",
+        "desc": "(g - r2) colour index, formed by subtracting columns <a href=\"#g\">g</a> and <a href=\"#r2\">r2</a>. See comments above.",
+        "form": ".2f"
+        },
+    "r_i": {
+        "tcomm": "(r - i) colour index, formed by subtracting columns r and i.",
+        "tdisp": "F3.2",
+        "tunit": "mag",
+        "tucd": "phot.color;em.opt.R;em.opt.I",
+        "type": "float",
+        "desc": "(r - i) colour index, formed by subtracting columns <a href=\"#r\">r</a> and <a href=\"#i\">i</a>. See comments above.",
+        "form": ".2f"
+        },
+    "r_ha": {
+        "tcomm": "(r - Halpha) colour index, formed by subtracting columns r and ha.",
+        "tdisp": "F3.2",
+        "tunit": "mag",
+        "tucd": "phot.color;em.opt.R;em.line.Halpha",
+        "type": "float",
+        "desc": "(r - Halpha) colour index, formed by subtracting columns <a href=\"#r\">r</a> and <a href=\"#ha\">ha</a>. See comments above.",
+        "form": ".2f"
+        },
+    
+
+    "clean_u": {
+        "tcomm": "True if the u-band detection is significant and the PSF fit good.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.U",
+        "type": "boolean",
+        "desc": "True if the u-band detection was significant and the PSF fit reliable (<a href=\"#snr_u\">snr_u</a> &gt; 10 &amp; <a href=\"#chi_u\">chi_u</a> &lt; 1.5)."
+        },
+    "u": {
+        "tcomm": "Default u-band VEGA magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.U;meta.main",
+        "type": "float",
+        "desc": "Default u-band magnitude obtained using PSF fitting. Calibrated in the Vega system.",
+        "form": ".2f"
+        },
+    "u_AB": {
+        "tcomm": "Default u-band AB magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.U",
+        "type": "float",
+        "desc": "Default u-band magnitude obtained using PSF fitting. Calibrated in the AB system.",
+        "form": ".2f"
+        },
+    "err_u": {
+        "tcomm": "Statistical uncertainty for u. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.U",        
+        "type": "float",
+        "desc": "Statistical uncertainty for u as determined by DAOPHOT's PSF-fitting routine. Does not include systematics such as flat-fielding or zeropoint calibration errors.",
+        "form": ".2f"
+        },
+    "chi_u": {
+        "tcomm": "Goodness of the PSF fit in u, as determined by DAOPHOT ALLSTAR.",
+        "tdisp": "F3.1",
+        "tunit": "",
+        "tucd": "stat.fit.chi2;em.opt.U",
+        "type": "float",
+        "desc": "Goodness of the PSF fit in u, as determined by DAOPHOT's ALLSTAR PSF-fitting routine. A value close to one is good.",
+        "form": ".1f"
+        },
+    "warning_u": {
+        "tcomm": "Flags problems encountered while fitting the PSF, if any.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.U",
+        "type": "string",
+        "desc": "Flags problems encountered while fitting the PSF, if any. Possible values include 'No_error', 'Off_image', 'Too_faint', and 'Bad_fit'. The magnitude values are left empty when an error occured, and hence this columns is for information only.",
+        "form": ""
+        },
+    "aperMag_u": {
+        "tcomm": "u-band VEGA magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.U",        
+        "type": "float",
+        "desc": "u-band VEGA magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMag_u_AB": {
+        "tcomm": "u-band AB magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.U",        
+        "type": "float",
+        "desc": "u-band AB magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMagErr_u": {
+        "tcomm": "Statistical uncertainty for aperMag_u. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.U",  
+        "type": "float",
+        "desc": "Uncertainty in aperMag_u. Does not include systematics such as flat-fielding and zeropoint calibration errors, or any errors due to crowding.",
+        "form": ".2f"
+        },
+    "snr_u": {
+        "tcomm": "Ratio of the signal in the aperture relative to the background.",
+        "tdisp": "F7.1",
+        "tunit": "",
+        "tucd": "stat.snr;em.opt.U",
+        "type": "float",
+        "desc": "Signal-to-noise ratio of the flux in the aperture, relative to the local background",
+        "form": ".1f"
+        },
+    "magLim_u": {
+        "tcomm": "The Vega magnitude a SNR=3 source would have at this position.",
+        "tdisp": "F4.1",
+        "tunit": "mag",
+        "tucd": "stat.max;phot.mag;em.opt.U",
+        "type": "float",
+        "desc": "The Vega magnitude a SNR=3 source would have at this position.",
+        "form": ".1f"
+        },
+    "psffwhm_u": {
+        "tcomm": "Typical PSF FWHM in the CCD frame.",
+        "tdisp": "F4.2",
+        "tunit": "arcsec",
+        "tucd": "instr.det.psf;stat.mean;em.opt.U",        
+        "type": "float",
+        "desc": "Typical Full Width at Half Maximum (FWHM) of the Point Spread Function (PSF) in the CCD frame.",
+        "form": ".2f"
+        },
+    "mjd_u": {
+        "tcomm": "Modified Julian Date at the start of the u-band exposure.",
+        "tdisp": "",
+        "tunit": "days",
+        "tucd": "time.epoch;em.opt.U",
+        "type": "double",
+        "desc": "Modified Julian Date at the start of the u-band exposure."
+        },
+    "detectionID_u": {
+        "tcomm": "Detection identifier: night-#exposure-#extension-#number.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id;em.opt.U",        
+        "type": "string",
+        "desc": "Unique identifier of the detection in the format \"#night-#exposure-#extension-#number\", for example \"20120429-00089-8-5386\"."
+        },
+
+
+    "clean_g": {
+        "tcomm": "True if the g-band detection is significant and the PSF fit good.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.B",
+        "type": "boolean",
+        "desc": "True if the u-band detection was significant and the PSF fit reliable (<a href=\"#snr_u\">snr_u</a> &gt; 10 &amp; <a href=\"#chi_u\">chi_u</a> &lt; 1.5)."
+        },
+    "g": {
+        "tcomm": "Default g-band VEGA magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.B;meta.main",
+        "type": "float",
+        "desc": "Default g-band magnitude obtained using PSF fitting. Calibrated in the Vega system.",
+        "form": ".2f"
+        },
+    "g_AB": {
+        "tcomm": "Default g-band AB magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.B",
+        "type": "float",
+        "desc": "Default g-band magnitude obtained using PSF fitting. Calibrated in the AB system.",
+        "form": ".2f"
+        },
+    "err_g": {
+        "tcomm": "Statistical uncertainty for g. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.B",        
+        "type": "float",
+        "desc": "Statistical uncertainty for g as determined by DAOPHOT's PSF-fitting routine. Does not include systematics such as flat-fielding or zeropoint calibration errors.",
+        "form": ".2f"
+        },
+    "chi_g": {
+        "tcomm": "Goodness of the PSF fit in g, as determined by DAOPHOT ALLSTAR.",
+        "tdisp": "F3.1",
+        "tunit": "",
+        "tucd": "stat.fit.chi2;em.opt.B",
+        "type": "float",
+        "desc": "Goodness of the PSF fit in g, as determined by DAOPHOT's ALLSTAR PSF-fitting routine. A value close to one is good.",
+        "form": ".1f"
+        },
+    "warning_g": {
+        "tcomm": "Flags problems encountered while fitting the PSF, if any.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.B",
+        "type": "string",
+        "desc": "Flags problems encountered while fitting the PSF, if any. Possible values include 'No_error', 'Off_image', 'Too_faint', and 'Bad_fit'. The magnitude values are left empty when an error occured, and hence this columns is for information only.",
+        "form": ""
+        },
+    "aperMag_g": {
+        "tcomm": "g-band VEGA magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.B",        
+        "type": "float",
+        "desc": "g-band VEGA magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMag_g_AB": {
+        "tcomm": "g-band AB magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.B",        
+        "type": "float",
+        "desc": "g-band AB magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMagErr_g": {
+        "tcomm": "Statistical uncertainty for aperMag_g. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.B",  
+        "type": "float",
+        "desc": "Uncertainty in aperMag_g. Does not include systematics such as flat-fielding and zeropoint calibration errors, or any errors due to crowding.",
+        "form": ".2f"
+        },
+    "snr_g": {
+        "tcomm": "Ratio of the signal in the aperture relative to the background.",
+        "tdisp": "F7.1",
+        "tunit": "",
+        "tucd": "stat.snr;em.opt.B",
+        "type": "float",
+        "desc": "Signal-to-noise ratio of the flux in the aperture, relative to the local background",
+        "form": ".1f"
+        },
+    "magLim_g": {
+        "tcomm": "The Vega magnitude a SNR=3 source would have at this position.",
+        "tdisp": "F4.1",
+        "tunit": "mag",
+        "tucd": "stat.max;phot.mag;em.opt.B",
+        "type": "float",
+        "desc": "The Vega magnitude a SNR=3 source would have at this position.",
+        "form": ".1f"
+        },
+    "psffwhm_g": {
+        "tcomm": "Typical PSF FWHM in the CCD frame.",
+        "tdisp": "F4.2",
+        "tunit": "arcsec",
+        "tucd": "instr.det.psf;stat.mean;em.opt.B",        
+        "type": "float",
+        "desc": "Typical Full Width at Half Maximum (FWHM) of the Point Spread Function (PSF) in the CCD frame.",
+        "form": ".2f"
+        },
+    "mjd_g": {
+        "tcomm": "Modified Julian Date at the start of the g-band exposure.",
+        "tdisp": "",
+        "tunit": "days",
+        "tucd": "time.epoch;em.opt.B",
+        "type": "double",
+        "desc": "Modified Julian Date at the start of the g-band exposure."
+        },
+    "detectionID_g": {
+        "tcomm": "Detection identifier: night-#exposure-#extension-#number.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id;em.opt.B",        
+        "type": "string",
+        "desc": "Unique identifier of the detection in the format \"#night-#exposure-#extension-#number\", for example \"20120429-00089-8-5386\"."
+        },
+
+    "clean_r2": {
+        "tcomm": "True if the r2-band detection is significant and the PSF fit good.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.R",
+        "type": "boolean",
+        "desc": "True if the r2-band detection was significant and the PSF fit reliable (<a href=\"#snr_u\">snr_u</a> &gt; 10 &amp; <a href=\"#chi_u\">chi_u</a> &lt; 1.5)."
+        },
+    "r2": {
+        "tcomm": "Second r-band VEGA magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R",
+        "type": "float",
+        "desc": "Second r-band magnitude obtained using PSF fitting. Calibrated in the Vega system.",
+        "form": ".2f"
+        },
+    "r2_AB": {
+        "tcomm": "Second r-band AB magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R",
+        "type": "float",
+        "desc": "Second r-band magnitude obtained using PSF fitting. Calibrated in the AB system.",
+        "form": ".2f"
+        },
+    "err_r2": {
+        "tcomm": "Statistical uncertainty for r2. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.R",        
+        "type": "float",
+        "desc": "Uncertainty for r2 as determined by DAOPHOT's PSF-fitting routine. Does not include systematics such as flat-fielding or zeropoint calibration errors.",
+        "form": ".2f"
+        },
+    "chi_r2": {
+        "tcomm": "Goodness of the PSF fit in r2, as determined by DAOPHOT ALLSTAR.",
+        "tdisp": "F3.1",
+        "tunit": "",
+        "tucd": "stat.fit.chi2;em.opt.R",
+        "type": "float",
+        "desc": "Goodness of the PSF fit in r2, as determined by DAOPHOT's ALLSTAR PSF-fitting routine. A value close to one is good.",
+        "form": ".1f"
+        },
+    "warning_r2": {
+        "tcomm": "Flags problems encountered while fitting the PSF, if any.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.R",
+        "type": "string",
+        "desc": "Flags problems encountered while fitting the PSF, if any. Possible values include 'No_error', 'Off_image', 'Too_faint', and 'Bad_fit'. The magnitude values are left empty when an error occured, and hence this columns is for information only.",
+        "form": ""
+        },
+    "aperMag_r2": {
+        "tcomm": "r2-band VEGA magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R",        
+        "type": "float",
+        "desc": "r2-band VEGA magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMag_r2_AB": {
+        "tcomm": "r2-band AB magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R",        
+        "type": "float",
+        "desc": "r2-band AB magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMagErr_r2": {
+        "tcomm": "Statistical uncertainty for aperMag_r2. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.R",  
+        "type": "float",
+        "desc": "Uncertainty in aperMag_r2. Does not include systematics such as flat-fielding and zeropoint calibration errors, or any errors due to crowding.",
+        "form": ".2f"
+        },
+    "snr_r2": {
+        "tcomm": "Ratio of the signal in the aperture relative to the background.",
+        "tdisp": "F7.1",
+        "tunit": "",
+        "tucd": "stat.snr;em.opt.R",
+        "type": "float",
+        "desc": "Signal-to-noise ratio of the flux in the aperture, relative to the local background",
+        "form": ".1f"
+        },
+    "magLim_r2": {
+        "tcomm": "The Vega magnitude a SNR=3 source would have at this position.",
+        "tdisp": "F4.1",
+        "tunit": "mag",
+        "tucd": "stat.max;phot.mag;em.opt.R",
+        "type": "float",
+        "desc": "The Vega magnitude a SNR=3 source would have at this position.",
+        "form": ".1f"
+        },
+    "psffwhm_r2": {
+        "tcomm": "Typical PSF FWHM in the CCD frame.",
+        "tdisp": "F4.2",
+        "tunit": "arcsec",
+        "tucd": "instr.det.psf;stat.mean;em.opt.R",        
+        "type": "float",
+        "desc": "Typical Full Width at Half Maximum (FWHM) of the Point Spread Function (PSF) in the CCD frame.",
+        "form": ".2f"
+        },
+    "mjd_r2": {
+        "tcomm": "Modified Julian Date at the start of the r2-band exposure.",
+        "tdisp": "",
+        "tunit": "days",
+        "tucd": "time.epoch;em.opt.R",
+        "type": "double",
+        "desc": "Modified Julian Date at the start of the r2-band exposure."
+        },
+    "detectionID_r2": {
+        "tcomm": "Detection identifier: night-#exposure-#extension-#number.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id;em.opt.R",        
+        "type": "string",
+        "desc": "Unique identifier of the detection in the format \"#night-#exposure-#extension-#number\", for example \"20120429-00089-8-5386\"."
+        },
+
+
+    "clean_ha": {
+        "tcomm": "True if the H-alpha detection is significant and the PSF fit good.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.line.Halpha",
+        "type": "boolean",
+        "desc": "True if the H-alpha detection is significant and the PSF fit reliable (<a href=\"#snr_u\">snr_u</a> &gt; 10 &amp; <a href=\"#chi_u\">chi_u</a> &lt; 1.5)."
+        },
+    "ha": {
+        "tcomm": "Default H-alpha VEGA magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.line.Halpha;meta.main",
+        "type": "float",
+        "desc": "Default H-alpha magnitude obtained using PSF fitting. Calibrated in the Vega system.",
+        "form": ".2f"
+        },
+    "err_ha": {
+        "tcomm": "Statistical uncertainty for ha. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.line.Halpha",        
+        "type": "float",
+        "desc": "Uncertainty for ha as determined by DAOPHOT's PSF-fitting routine. Does not include systematics such as flat-fielding or zeropoint calibration errors.",
+        "form": ".2f"
+        },
+    "chi_ha": {
+        "tcomm": "Goodness of the PSF fit in H-alpha, as determined by DAOPHOT.",
+        "tdisp": "F3.1",
+        "tunit": "",
+        "tucd": "stat.fit.chi2;em.line.Halpha",
+        "type": "float",
+        "desc": "Goodness of the PSF fit in H-alpha, as determined by DAOPHOT's ALLSTAR PSF-fitting routine. A value close to one is good.",
+        "form": ".1f"
+        },
+    "warning_ha": {
+        "tcomm": "Flags problems encountered while fitting the PSF, if any.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.line.Halpha",
+        "type": "string",
+        "desc": "Flags problems encountered while fitting the PSF, if any. Possible values include 'No_error', 'Off_image', 'Too_faint', and 'Bad_fit'. The magnitude values are left empty when an error occured, and hence this columns is for information only.",
+        "form": ""
+        },
+    "aperMag_ha": {
+        "tcomm": "H-alpha VEGA magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.line.Halpha",        
+        "type": "float",
+        "desc": "H-alpha VEGA magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMagErr_ha": {
+        "tcomm": "Statistical uncertainty for aperMag_ha. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.line.Halpha",  
+        "type": "float",
+        "desc": "Uncertainty in aperMag_ha. Does not include systematics such as flat-fielding and zeropoint calibration errors, or any errors due to crowding.",
+        "form": ".2f"
+        },
+    "snr_ha": {
+        "tcomm": "Ratio of the signal in the aperture relative to the background.",
+        "tdisp": "F7.1",
+        "tunit": "",
+        "tucd": "stat.snr;em.line.Halpha",
+        "type": "float",
+        "desc": "Signal-to-noise ratio of the flux in the aperture, relative to the local background",
+        "form": ".1f"
+        },
+    "magLim_ha": {
+        "tcomm": "The Vega magnitude a SNR=3 source would have at this position.",
+        "tdisp": "F4.1",
+        "tunit": "mag",
+        "tucd": "stat.max;phot.mag;em.line.Halpha",
+        "type": "float",
+        "desc": "The Vega magnitude a SNR=3 source would have at this position.",
+        "form": ".1f"
+        },
+    "psffwhm_ha": {
+        "tcomm": "Typical PSF FWHM in the CCD frame.",
+        "tdisp": "F4.2",
+        "tunit": "arcsec",
+        "tucd": "instr.det.psf;stat.mean;em.line.Halpha",        
+        "type": "float",
+        "desc": "Typical Full Width at Half Maximum (FWHM) of the Point Spread Function (PSF) in the CCD frame.",
+        "form": ".2f"
+        },
+    "mjd_ha": {
+        "tcomm": "Modified Julian Date at the start of the H-alpha exposure.",
+        "tdisp": "",
+        "tunit": "days",
+        "tucd": "time.epoch;em.line.Halpha",
+        "type": "double",
+        "desc": "Modified Julian Date at the start of the H-alpha exposure."
+        },
+    "detectionID_ha": {
+        "tcomm": "Detection identifier: night-#exposure-#extension-#number.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id;em.line.Halpha",        
+        "type": "string",
+        "desc": "Unique identifier of the detection in the format \"#night-#exposure-#extension-#number\", for example \"20120429-00089-8-5386\"."
+        },
+
+
+    "clean_r": {
+        "tcomm": "True if the r-band detection is significant and the PSF fit good.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.R",
+        "type": "boolean",
+        "desc": "True if the r-band detection was significant and the PSF fit good (<a href=\"#snr_r\">snr_r</a> &gt; 10 &amp; <a href=\"#chi_r\">chi_r</a> &lt; 1.5)."
+        },
+    "r": {
+        "tcomm": "Default r-band VEGA magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R;meta.main",
+        "type": "float",
+        "desc": "Default r-band magnitude obtained using PSF fitting. Calibrated in the Vega system.",
+        "form": ".2f"
+        },
+    "r_AB": {
+        "tcomm": "Default r-band AB magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R",
+        "type": "float",
+        "desc": "Default r-band magnitude obtained using PSF fitting. Calibrated in the AB system.",
+        "form": ".2f"
+        },
+    "err_r": {
+        "tcomm": "Statistical uncertainty for r. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.R",        
+        "type": "float",
+        "desc": "Statistical uncertainty for r as determined by DAOPHOT's PSF-fitting routine. Does not include systematics such as flat-fielding or zeropoint calibration errors.",
+        "form": ".2f"
+        },
+    "chi_r": {
+        "tcomm": "Goodness of the PSF fit in r, as determined by DAOPHOT ALLSTAR.",
+        "tdisp": "F3.1",
+        "tunit": "",
+        "tucd": "stat.fit.chi2;em.opt.R",
+        "type": "float",
+        "desc": "Goodness of the PSF fit in r, as determined by DAOPHOT's ALLSTAR PSF-fitting routine. A value close to one is good.",
+        "form": ".1f"
+        },
+    "warning_r": {
+        "tcomm": "Flags problems encountered while fitting the PSF, if any.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.R",
+        "type": "string",
+        "desc": "Flags problems encountered while fitting the PSF, if any. Possible values include 'No_error', 'Off_image', 'Too_faint', and 'Bad_fit'. The magnitude values are left empty when an error occured, and hence this columns is for information only.",
+        "form": ""
+        },
+    "aperMag_r": {
+        "tcomm": "r-band VEGA magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R",        
+        "type": "float",
+        "desc": "r-band VEGA magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMag_r_AB": {
+        "tcomm": "r-band AB magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.R",        
+        "type": "float",
+        "desc": "r-band AB magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMagErr_r": {
+        "tcomm": "Statistical uncertainty for aperMag_r. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.R",  
+        "type": "float",
+        "desc": "Uncertainty in aperMag_r. Does not include systematics such as flat-fielding and zeropoint calibration errors, or any errors due to crowding.",
+        "form": ".2f"
+        },
+    "snr_r": {
+        "tcomm": "Ratio of the signal in the aperture relative to the background.",
+        "tdisp": "F7.1",
+        "tunit": "",
+        "tucd": "stat.snr;em.opt.R",
+        "type": "float",
+        "desc": "Signal-to-noise ratio of the flux in the aperture, relative to the local background",
+        "form": ".1f"
+        },
+    "magLim_r": {
+        "tcomm": "The Vega magnitude a SNR=3 source would have at this position.",
+        "tdisp": "F4.1",
+        "tunit": "mag",
+        "tucd": "stat.max;phot.mag;em.opt.R",
+        "type": "float",
+        "desc": "The Vega magnitude a SNR=3 source would have at this position.",
+        "form": ".1f"
+        },
+    "psffwhm_r": {
+        "tcomm": "Typical PSF FWHM in the CCD frame.",
+        "tdisp": "F4.2",
+        "tunit": "arcsec",
+        "tucd": "instr.det.psf;stat.mean;em.opt.R",        
+        "type": "float",
+        "desc": "Typical Full Width at Half Maximum (FWHM) of the Point Spread Function (PSF) in the CCD frame.",
+        "form": ".2f"
+        },
+    "mjd_r": {
+        "tcomm": "Modified Julian Date at the start of the r-band exposure.",
+        "tdisp": "",
+        "tunit": "days",
+        "tucd": "time.epoch;em.opt.R",
+        "type": "double",
+        "desc": "Modified Julian Date at the start of the r-band exposure."
+        },
+    "detectionID_r": {
+        "tcomm": "Detection identifier: night-#exposure-#extension-#number.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id;em.opt.R",        
+        "type": "string",
+        "desc": "Unique identifier of the detection in the format \"#night-#exposure-#extension-#number\", for example \"20120429-00089-8-5386\"."
+        },
+
+
+    "clean_i": {
+        "tcomm": "True if the i-band detection is significant and the PSF fit good.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.I",
+        "type": "boolean",
+        "desc": "True if the i-band detection was significant and the PSF fit reliable (<a href=\"#snr_u\">snr_u</a> &gt; 10 &amp; <a href=\"#chi_u\">chi_u</a> &lt; 1.5)."
+        },
+    "i": {
+        "tcomm": "Default i-band VEGA magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.I;meta.main",
+        "type": "float",
+        "desc": "Default i-band magnitude obtained using PSF fitting. Calibrated in the Vega system.",
+        "form": ".2f"
+        },
+    "i_AB": {
+        "tcomm": "Default i-band AB magnitude obtained using PSF fitting.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.I",
+        "type": "float",
+        "desc": "Default i-band magnitude obtained using PSF fitting. Calibrated in the AB system.",
+        "form": ".2f"
+        },
+    "err_i": {
+        "tcomm": "Statistical uncertainty for i. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.I",        
+        "type": "float",
+        "desc": "Statistical uncertainty for i as determined by DAOPHOT's PSF-fitting routine. Does not include systematics such as flat-fielding or zeropoint calibration errors.",
+        "form": ".2f"
+        },
+    "chi_i": {
+        "tcomm": "Goodness of the PSF fit in i, as determined by DAOPHOT ALLSTAR.",
+        "tdisp": "F3.1",
+        "tunit": "",
+        "tucd": "stat.fit.chi2;em.opt.I",
+        "type": "float",
+        "desc": "Goodness of the PSF fit in i, as determined by DAOPHOT's ALLSTAR PSF-fitting routine. A value close to one is good.",
+        "form": ".1f"
+        },
+    "warning_i": {
+        "tcomm": "Flags problems encountered while fitting the PSF, if any.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.code.qual;em.opt.I",
+        "type": "string",
+        "desc": "Flags problems encountered while fitting the PSF, if any. Possible values include 'No_error', 'Off_image', 'Too_faint', and 'Bad_fit'. The magnitude values are left empty when an error occured, and hence this columns is for information only.",
+        "form": ""
+        },
+    "aperMag_i": {
+        "tcomm": "i-band VEGA magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.I",        
+        "type": "float",
+        "desc": "i-band VEGA magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMag_i_AB": {
+        "tcomm": "i-band AB magnitude obtained using aperture photometry.",
+        "tdisp": "F5.2",
+        "tunit": "mag",
+        "tucd": "phot.mag;em.opt.I",        
+        "type": "float",
+        "desc": "i-band AB magnitude obtained using aperture photometry. This magnitude is prone to contamination from nearby sources in crowded fields.",
+        "form": ".2f"
+        },
+    "aperMagErr_i": {
+        "tcomm": "Statistical uncertainty for aperMag_i. Not including systematics.",
+        "tdisp": "F4.2",
+        "tunit": "mag",
+        "tucd": "stat.error;em.opt.I",  
+        "type": "float",
+        "desc": "Uncertainty in aperMag_i. Does not include systematics such as flat-fielding and zeropoint calibration errors, or any errors due to crowding.",
+        "form": ".2f"
+        },
+    "snr_i": {
+        "tcomm": "Ratio of the signal in the aperture relative to the background.",
+        "tdisp": "F7.1",
+        "tunit": "",
+        "tucd": "stat.snr;em.opt.I",
+        "type": "float",
+        "desc": "Signal-to-noise ratio of the flux in the aperture, relative to the local background",
+        "form": ".1f"
+        },
+    "magLim_i": {
+        "tcomm": "The Vega magnitude a SNR=3 source would have at this position.",
+        "tdisp": "F4.1",
+        "tunit": "mag",
+        "tucd": "stat.max;phot.mag;em.opt.I",
+        "type": "float",
+        "desc": "The Vega magnitude a SNR=3 source would have at this position.",
+        "form": ".1f"
+        },
+    "psffwhm_i": {
+        "tcomm": "Typical PSF FWHM in the CCD frame.",
+        "tdisp": "F4.2",
+        "tunit": "arcsec",
+        "tucd": "instr.det.psf;stat.mean;em.opt.I",        
+        "type": "float",
+        "desc": "Typical Full Width at Half Maximum (FWHM) of the Point Spread Function (PSF) in the CCD frame.",
+        "form": ".2f"
+        },
+    "mjd_i": {
+        "tcomm": "Modified Julian Date at the start of the i-band exposure.",
+        "tdisp": "",
+        "tunit": "days",
+        "tucd": "time.epoch;em.opt.I",
+        "type": "double",
+        "desc": "Modified Julian Date at the start of the i-band exposure."
+        },
+    "detectionID_i": {
+        "tcomm": "Detection identifier: night-#exposure-#extension-#number.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "meta.id;em.opt.I",        
+        "type": "string",
+        "desc": "Unique identifier of the detection in the format \"#night-#exposure-#extension-#number\", for example \"20120429-00089-8-5386\"."
+        },
+
+
+    "field": {
+        "tcomm": "Survey-specific identifier of the telescope pointing.",
+        "tdisp": "",
+        "tunit": "",
+        "tucd": "obs.field;meta.id",
+        "type": "string",
+        "desc": "Survey-specific identifier of the telescope pointing, e.g. \"0001a\"."
+        },
+    "ext": {
+        "tcomm": "OmegaCAM CCD extension used (1-32).",
+        "tdisp": "I2.1",
+        "tunit": "",
+        "tucd": "obs.param;meta.id",
+        "type": "short",
+        "desc": "OmegaCAM CCD used, identified by the extension number in the FITS files that the instrument produces."
+        },
+    "l": {
+        "tcomm": "Galactic longitude in decimal degrees (IAU 1958 system).",
+        "tdisp": "F9.5",
+        "tunit": "deg",
+        "tucd": "pos.galactic.lon",
+        "type": "float",
+        "desc": "Galactic longitude in decimal degrees (IAU 1958 system)."
+        },
+    "b": {
+        "tcomm": "Galactic latitude in decimal degrees (IAU 1958 system).",
+        "tdisp": "F9.5",
+        "tunit": "deg",
+        "tucd": "pos.galactic.lat",
+        "type": "float",
+        "desc": "Galactic latitude in decimal degrees (IAU 1958 system)."
+        },     
+    "nbDist": {
+        "tcomm": "Distance to the nearest neighbour detected in the same exposure.",
+        "tdisp": "F4.1",
+        "tunit": "arcsec",
+        "tucd": "pos.angDistance",
+        "type": "float",
+        "desc": "Angular distance to the nearest neighbour detected in the same exposure"
+        }
+}]
