@@ -31,7 +31,13 @@ for band in VPHAS_BANDS:
     for prefix in ['clean_', '', 'err_', 'chi_', 'warning_',
                    'aperMag_', 'aperMagErr_', 'snr_', 'magLim_',
                    'psffwhm_', 'mjd_', 'detectionID_']:
-        RELEASE_COLUMNS.append(prefix+band)
+        RELEASE_COLUMNS.append(prefix + band)
+        # Hack: add the AB magnitude columns
+        if not band == 'ha':
+            if prefix == '':
+                RELEASE_COLUMNS.append(band + '_AB')
+            elif prefix == 'aperMag_':
+                RELEASE_COLUMNS.append(prefix + band + '_AB')
 for extra in ['field', 'ext', 'l', 'b', 'nbDist']:
     RELEASE_COLUMNS.append(extra)
 
@@ -251,11 +257,15 @@ class VphasCatalogTile(object):
                 and not col.startswith('mjd')
                 and not col.startswith('detectionID') 
                 and not col.startswith('clean')
-                and not col.startswith('warning')):
+                and not col.startswith('warning')
+                and not col.endswith('AB')):
                 tbl.columns[col] = tbl[col].astype('float32')
         for band in VPHAS_BANDS:
             tbl.columns['detectionID_' + band] = tbl['detectionID_' + band].astype('23a')
             tbl.columns['warning_' + band] = tbl['error_' + band].astype('12a')
+            # Hack: add the AB columns
+            tbl[band + '_AB'] = tbl[band]
+            tbl['aperMag_' + band + '_AB'] = tbl['aperMag_' + band]
         tbl.columns['sourceID'] = tbl['photID'].astype('14a')
         tbl.columns['field'] = tbl['field'].astype('5a')
         tbl.columns['ext'] = tbl['ccd'].astype('uint8')
@@ -285,7 +295,7 @@ class VphasCatalogTile(object):
         # Now add identical empty columns for each band
         for band in ['u', 'g', 'r2']:
             for colname in ['detectionID_', '', 'err_', 'chi_',
-                            'sharpness_', 'sky_', 'warning_', 'aperMag_',
+                            'sharpness_', 'sky_', 'error_', 'aperMag_',
                             'aperMagErr_', 'snr_', 'magLim_', 'psffwhm_',
                             'airmass_', 'mjd_', 'pixelShift_', 'clean_',
                             'offsetRa_', 'offsetDec_']:
