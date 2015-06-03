@@ -310,7 +310,7 @@ class VphasCatalogTile(object):
                 elif colname == 'detectionID_':
                     mydtype = '23a'
                     mydata = col_nullbyte
-                elif colname == 'warning_':
+                elif colname == 'error_':
                     mydtype = '12a'
                     mydata = col_errormsg
                 elif colname == 'mjd_':
