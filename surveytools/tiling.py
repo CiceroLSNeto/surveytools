@@ -25,14 +25,14 @@ from .catalogue import DEFAULT_CONFIGFILE
 
 
 # Which columns do we want to keep in the final tiled catalogues?
-RELEASE_COLUMNS = ['RAJ2000', 'DEJ2000', 'u_g', 'g_r2', 'r_i', 'r_ha',
-                   'sourceID', 'primaryID', 'primary_source', 'nObs', 'nndist', 'clean']
+RELEASE_COLUMNS = ['RAJ2000', 'DEJ2000', 'sourceID', 'primaryID', 'primary_source',
+                   'nObs', 'clean', 'u_g', 'g_r2', 'r_i', 'r_ha']
 for band in VPHAS_BANDS:
     for prefix in ['clean_', '', 'err_', 'chi_', 'warning_',
                    'aperMag_', 'aperMagErr_', 'snr_', 'magLim_',
                    'psffwhm_', 'mjd_', 'detectionID_']:
         RELEASE_COLUMNS.append(prefix+band)
-for extra in ['field', 'ccd', 'l', 'b']:
+for extra in ['field', 'ext', 'l', 'b', 'nbDist']:
     RELEASE_COLUMNS.append(extra)
 
 
@@ -247,7 +247,7 @@ class VphasCatalogTile(object):
         # this should have been done in catalogue.py, but due to time pressure
         # (i.e. to avoid re-generating all catalogues) we fix the data types here
         for col in RELEASE_COLUMNS:
-            if (col not in ['RAJ2000', 'DEJ2000', 'photID', 'primaryID', 'primary_source', 'nObs', 'field', 'ccd', 'l', 'b']
+            if (col not in ['RAJ2000', 'DEJ2000', 'sourceID', 'primaryID', 'primary_source', 'nObs', 'field', 'ext', 'l', 'b', 'nbDist']
                 and not col.startswith('mjd')
                 and not col.startswith('detectionID') 
                 and not col.startswith('clean')
@@ -258,7 +258,8 @@ class VphasCatalogTile(object):
             tbl.columns['warning_' + band] = tbl['error_' + band].astype('12a')
         tbl.columns['sourceID'] = tbl['photID'].astype('14a')
         tbl.columns['field'] = tbl['field'].astype('5a')
-        tbl.columns['ccd'] = tbl['ccd'].astype('uint8')
+        tbl.columns['ext'] = tbl['ccd'].astype('uint8')
+        tbl.columns['nbDist'] = tbl['nndist'].astype('float32')
         # Hack: last-minute changes to comply with the ESO standard
         tbl['ra'].name = 'RAJ2000'
         tbl['dec'].name = 'DEJ2000'
