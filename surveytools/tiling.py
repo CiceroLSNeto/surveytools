@@ -16,7 +16,7 @@ from shapely.geometry.polygon import LinearRing, Polygon
 
 from astropy import log
 from astropy import units as u
-from astropy.table import Column, Table, vstack
+from astropy.table import Column, MaskedColumn, Table, vstack
 from astropy.coordinates import SkyCoord
 from astropy.utils.console import ProgressBar
 
@@ -265,8 +265,12 @@ class VphasCatalogTile(object):
             tbl.columns['warning_' + band] = tbl['error_' + band].astype('12a')
             # Hack: add the AB magnitude columns
             if band != 'ha':
-                tbl[band + '_AB'] = tbl[band]
-                tbl['aperMag_' + band + '_AB'] = tbl['aperMag_' + band]
+                tmp1 = tbl[band].copy()
+                tmp1.name = band + '_AB'
+                tbl.columns[band + '_AB'] = tmp1
+                tmp2 = tbl['aperMag_' + band].copy()
+                tmp2.name = 'aperMag_' + band + '_AB'
+                tbl.columns['aperMag_' + band + '_AB'] = tmp2
         tbl.columns['sourceID'] = tbl['photID'].astype('14a')
         tbl.columns['field'] = tbl['field'].astype('5a')
         tbl.columns['ext'] = tbl['ccd'].astype('uint8')
