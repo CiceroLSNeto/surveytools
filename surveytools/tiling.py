@@ -247,7 +247,7 @@ class VphasCatalogTile(object):
         # this should have been done in catalogue.py, but due to time pressure
         # (i.e. to avoid re-generating all catalogues) we fix the data types here
         for col in RELEASE_COLUMNS:
-            if (col not in ['ra', 'dec', 'photID', 'primaryID', 'primary_source', 'nObs', 'field', 'ccd', 'l', 'b']
+            if (col not in ['RAJ2000', 'DEJ2000', 'photID', 'primaryID', 'primary_source', 'nObs', 'field', 'ccd', 'l', 'b']
                 and not col.startswith('mjd')
                 and not col.startswith('detectionID') 
                 and not col.startswith('clean')
@@ -332,9 +332,9 @@ class VphasCatalogTile(object):
                           -desc "Source designation (JHHMMSS.ss+DDMMSS.s)." \
                           name \
                           "concat(\\"VPHASDR2 J\\", 
-                                            replaceAll(degreesToHms(RAJ2000, 2),
+                                            replaceAll(degreesToHms(RAJ2000, 1),
                                                        \\":\\", \\"\\"), 
-                                            replaceAll(degreesToDms(DEJ2000, 2),
+                                            replaceAll(degreesToDms(DEJ2000, 1),
                                                        \\":\\", \\"\\")
                                             )"; \
                   sort name;'""".format(**param)
