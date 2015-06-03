@@ -1,0 +1,39 @@
+#!/bin/bash -f
+#PBS -l nodes=1:ppn=1
+#PBS -k oe                                                          
+#PBS -q cmain
+#PBS -l walltime=11:59:00
+#PBS -m a
+#PBS -l pmem=4gb
+
+echo `date`
+echo ------------------------------------------------------
+echo -n 'Started catalogueing '; cat ${OFFSET}
+echo -n 'Job is running on node '; cat $PBS_NODEFILE
+echo ------------------------------------------------------
+echo Number of processes: $NP
+echo PBS: qsub is running on $PBS_O_HOST
+echo PBS: originating queue is $PBS_O_QUEUE
+echo PBS: executing queue is $PBS_QUEUE
+echo PBS: working directory is $PBS_O_WORKDIR
+echo PBS: execution mode is $PBS_ENVIRONMENT
+echo PBS: job identifier is $PBS_JOBID
+echo PBS: job name is $PBS_JOBNAME
+echo PBS: node file is $PBS_NODEFILE
+echo PBS: array ID is $PBS_ARRAYID
+echo ------------------------------------------------------
+
+# Activate the right Python environment
+export PATH=/home/gb/bin/anaconda/bin:$PATH
+source activate surveytools
+
+# Ensure IRAF writes any caching files to /tmp
+cd /tmp
+
+# Run the cataloguing procedure
+CONFIG='/car-data/gb/vphas/psfcat/config.ini'
+nice vphas-tile-merge ${L} ${B} -s ${SIZE} -c ${CONFIG}
+
+echo ------------------------------------------------------                                  
+echo Job ends
+echo `date`
