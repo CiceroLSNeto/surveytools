@@ -33,7 +33,7 @@ for band in VPHAS_BANDS:
                    'psffwhm_', 'mjd_', 'detectionID_']:
         RELEASE_COLUMNS.append(prefix + band)
         # Hack: add the AB magnitude columns
-        if not band == 'ha':
+        if band != 'ha':
             if prefix == '':
                 RELEASE_COLUMNS.append(band + '_AB')
             elif prefix == 'aperMag_':
@@ -263,9 +263,10 @@ class VphasCatalogTile(object):
         for band in VPHAS_BANDS:
             tbl.columns['detectionID_' + band] = tbl['detectionID_' + band].astype('23a')
             tbl.columns['warning_' + band] = tbl['error_' + band].astype('12a')
-            # Hack: add the AB columns
-            tbl[band + '_AB'] = tbl[band]
-            tbl['aperMag_' + band + '_AB'] = tbl['aperMag_' + band]
+            # Hack: add the AB magnitude columns
+            if band != 'ha':
+                tbl[band + '_AB'] = tbl[band]
+                tbl['aperMag_' + band + '_AB'] = tbl['aperMag_' + band]
         tbl.columns['sourceID'] = tbl['photID'].astype('14a')
         tbl.columns['field'] = tbl['field'].astype('5a')
         tbl.columns['ext'] = tbl['ccd'].astype('uint8')
