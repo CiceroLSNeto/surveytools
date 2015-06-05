@@ -35,6 +35,8 @@ def get_shifts(offset):
     shifts = {}
     for band in ['u', 'g', 'r2', 'r', 'i']:
         shifts[band] = SHIFTS[offset][band + 'shift']
+        if np.isnan(shifts[band]):
+            shifts[band] = get_median_shifts()[band]
         shifts[band + '_ab'] = shifts[band] + VEGA2AB[band]
     # H-alpha uses the r-band shift but requires a special ZPT correction to fix the offset to 3.01
     hazpcorr = HA_ZPT_CORR[offset]
