@@ -336,7 +336,7 @@ class VphasCatalogTile(object):
 
         instring = ''
         for fn in self.catalogset.table['filename']:
-            fnres = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
+            fnres = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'calibrated'))
             instring += 'in={0} '.format(fnres)
         param = {'l_min': self.l % 360, 'l_max': (self.l + self.size) % 360,
                  'b_min': self.b, 'b_max': self.b + self.size,}
