@@ -108,7 +108,7 @@ class VphasCatalogTile(object):
                                        'vphas-offsetcats.fits'))
         # Avoid using extension 10 before June 2nd due to strong gain variations
         mask = (
-                    (cats['extension'] == 10) &
+                    (cats['extension'] == "10") &
                     (
                             (cats['rmjd'] < 56081) |
                             (cats['hamjd'] < 56081) |
