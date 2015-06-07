@@ -106,6 +106,18 @@ class VphasCatalogTile(object):
         """
         cats = Table.read(os.path.join(self.cfg['vphas']['cat_dir'],
                                        'vphas-offsetcats.fits'))
+        # Avoid using extension 10 before June 2nd due to strong gain variations
+        mask = (
+                    (cats['extension'] == 10) &
+                    (
+                            (cats['rmjd'] < 56081) |
+                            (cats['hamjd'] < 56081) |
+                            (cats['imjd'] < 56081) |
+                            (cats['umjd'] < 56081) |
+                            (cats['gmjd'] < 56081)
+                    )
+                )
+        cats = cats[~mask]
         # Add the min/max range in galactic latitude and longitude
         galcrd = [SkyCoord(cats[ra_col], cats[dec_col], unit='deg').galactic
                   for ra_col in ['ra_min', 'ra_max']
