@@ -11,7 +11,7 @@ from astropy.io import fits
 SHIFTS_TBL = Table.read('shifts-mike.fits')
 SHIFTS = dict(zip(SHIFTS_TBL['field'], SHIFTS_TBL))
 
-INDEX_TBL = Table.read('vphas-offsetcats.fits')
+INDEX_TBL = Table.read('/car-data/gb/vphas/psfcat/vphas-offsetcats.fits')
 HA_ZPT_CORR = dict(zip(INDEX_TBL['offset'], -(3.01 - (INDEX_TBL['rzpt'] - INDEX_TBL['hazpt']))))
 
 # From Fukugita (1996)
@@ -48,9 +48,9 @@ def get_shifts(offset):
 def apply_calibration(input_fn):
     offset = input_fn.split('/')[-1].split('-')[0]
     shifts = get_shifts(offset)
-    log.info(shifts)
+    #log.info(shifts)
 
-    log.debug('Opening {}'.format(input_fn))
+    log.info('Opening {}'.format(input_fn))
     cat = fits.open(input_fn, memmap=False)
     for band in ['u', 'g', 'r2', 'ha', 'r', 'i']:
         cat[1].data[band] += shifts[band]
@@ -66,16 +66,16 @@ def apply_calibration(input_fn):
     cat[1].data['r_i'] += shifts['r'] - shifts['i']
     cat[1].data['r_ha'] += shifts['r'] - shifts['ha']
 
-    output_fn = input_fn.replace('resolved', 'calibrated')
+    output_fn = input_fn.replace('resolved.fits', 'calibrated.fits')
     log.info('Writing {}'.format(output_fn))
     cat.writeto(output_fn, clobber=True)
     
 
 if __name__ == '__main__':
-    log.setLevel('DEBUG')
-    filenames = glob.glob('tmp/*resolved.fits')
+    log.setLevel('INFO')
+    filenames = glob.glob('/car-data/gb/vphas/psfcat/resolved/*resolved.fits')
 
     import multiprocessing
-    pool = multiprocessing.Pool(1)
+    pool = multiprocessing.Pool(8)
     pool.map(apply_calibration, filenames)
     #apply_calibration('tmp/0005a-1-resolved.fits')

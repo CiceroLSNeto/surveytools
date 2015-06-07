@@ -1413,12 +1413,14 @@ def offset_catalogue_metadata(filename):
             try:
                 row[band + 'psfrms'] = f[1].header[(band + 'PSFRMS').upper()]
                 row[band + 'zpt'] =  f[1].header[(band + 'zpt').upper()]
+                row[band + 'mjd'] =  f[1].header[(band + 'mjd').upper()]
                 row['n_clean_' + band] = f[1].data['clean_' + band].sum()
                 row['med_maglim_' + band] = np.nanmedian(f[1].data['magLim_' + band])
                 row['psffwhm_' + band] = f[1].data['psffwhm_' + band][0]
             except KeyError:  # band may not be in the catalogue
                 row[band + 'psfrms'] = np.nan
                 row[band + 'zpt'] = np.nan
+                row[band + 'mjd'] = np.nan
                 row['n_clean_' + band] = np.nan
                 row['med_maglim_' + band] = np.nan
                 row['psffwhm_' + band] = np.nan
@@ -1444,7 +1446,7 @@ def vphas_index_offset_catalogues_main(args=None):
     DESTINATION = 'vphas-offsetcats.fits'
     log.info('Writing {}'.format(DESTINATION))
 
-    pool = multiprocessing.Pool(8)
+    pool = multiprocessing.Pool(24)
     filenames = glob.glob(os.path.join(cfg['catalogue']['destdir'], '*'))
     rows = []
     with ProgressBar(len(filenames)) as bar:
