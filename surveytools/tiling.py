@@ -150,7 +150,7 @@ class VphasCatalogTile(object):
         if len(self.catalogset.table) < 1:
             log.warning('Tile is empty.')
         else:
-            self.resolve()
+            #self.resolve()
             self.concatenate()
 
     def resolve(self):
