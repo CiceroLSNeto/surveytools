@@ -82,7 +82,10 @@ def fix_header(input_fn, output_path=DESTINATION, add_prov_keywords=True):
             for prefix in np.unique(f[1].data['detectionID_' + band].astype('|S14')):
                 if prefix == '':
                     continue
-                prov.append('o' + prefix.decode('ascii').replace('-', '_') + '.fits.fz')
+                fn = 'o' + prefix.decode('ascii').replace('-', '_') + '.fits.fz'
+                # As a safety measure, make sure the filename has the expected format
+                if re.fullmatch('o[0-9]{8}_[0-9]*.fits.fz', fn) != None:
+                    prov.append(fn)
         for idx, fn in enumerate(sorted(prov)):
             f[0].header.set('PROV{}'.format(idx+1), fn, 'Originating science file')
 
