@@ -155,7 +155,8 @@ class VphasCatalogTile(object):
 
     def resolve(self):
         # Ensure the output dir exists
-        destination_dir = self.cfg['vphas']['resolved_cat_dir']
+        destination_dir = os.path.join(self.cfg['vphas']['resolved_cat_dir'],
+                                       self.name)
         if not os.path.exists(destination_dir):
             os.makedirs(destination_dir)
         # Start resolving, with fields ordered by seeing
@@ -167,12 +168,13 @@ class VphasCatalogTile(object):
     def _resolve_one(self, idx, max_distance=0.5):
         refcat_info = self.catalogset.table[idx]
         # We only resolve if the expected output file does not already exists;
-        # this way we avoid repeating work for frames on tile edges.
-        expected_path = os.path.join(self.cfg['vphas']['resolved_cat_dir'],
-                                     refcat_info['filename'].replace('cat', 'resolved'))
-        if os.path.exists(expected_path):
+        # this way we avoid repeating work.
+        dest_fn = os.path.join(self.cfg['vphas']['resolved_cat_dir'],
+                               self.name,
+                               refcat_info['filename'].replace('cat', 'resolved'))
+        if os.path.exists(dest_fn):
             log.debug('Skipping {}: already found {}'.format(refcat_info['filename'],
-                                                             expected_path))
+                                                             dest_fn))
             return
         # The frame hasn't been processed yet:
         log.debug('Now resolving {}'.format(refcat_info['filename']))
@@ -229,7 +231,7 @@ class VphasCatalogTile(object):
             # Keep a record of the number of alternatives available
             nobs[sourceid] = len(photid_candidates)
 
-        self._write_resolved_catalog(refcat_info['filename'], nobs)
+        self._write_resolved_catalog(refcat_info['filename'], dest_fn, nobs)
 
     def _get_catalog_data(self, filename):
         """Returns an offset ccd catalogue, augmented with columns needed for seaming."""
@@ -250,7 +252,11 @@ class VphasCatalogTile(object):
         tbl['band_count'] = band_count
         return tbl
 
-    def _write_resolved_catalog(self, fn, nobs):
+    def _write_resolved_catalog(self, fn, dest_fn, nobs):
+        """
+        fn: filename of the original catalogue
+        dest_fn: destination of the resolved catalogue
+        """
         path = os.path.join(self.cfg['catalogue']['destdir'], fn)
         tbl = Table.read(path)
         if 'g' not in tbl.columns:
@@ -259,8 +265,7 @@ class VphasCatalogTile(object):
         tbl['primaryID'] = Column(primaryids, dtype='14a')
         tbl['primary_source'] = tbl['photID'] == primaryids
         tbl['nObs'] = Column([nobs[photid] for photid in tbl['photID']], dtype='uint8')
-        destination = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'resolved'))
-        log.debug('Writing {}'.format(destination))
+        log.debug('Writing {}'.format(dest_fn))
         # Hack: use sensible types
         # this should have been done in catalogue.py, but due to time pressure
         # (i.e. to avoid re-generating all catalogues) we fix the data types here
@@ -293,13 +298,13 @@ class VphasCatalogTile(object):
         # Finally, write to disk
         tbl = Table(tbl, copy=False)  # necessary!
         # file may have been written by another process in meanwhile
-        if not os.path.exists(destination):
+        if not os.path.exists(dest_fn):
             try:
-                tbl[RELEASE_COLUMNS].write(destination)
+                tbl[RELEASE_COLUMNS].write(dest_fn)
             except OSError:
                 pass  # dont let the script crash if the file was written by a competing process
         else:
-            log.warning('Not overwriting ' + destination)
+            log.warning('Not overwriting ' + dest_fn)
         
     def _add_blue_cols(self, tbl):
         """Add empty columns for the Ugr data."""
@@ -348,7 +353,9 @@ class VphasCatalogTile(object):
 
         instring = ''
         for fn in self.catalogset.table['filename']:
-            fnres = os.path.join(self.cfg['vphas']['resolved_cat_dir'], fn.replace('cat', 'calibrated'))
+            fnres = os.path.join(self.cfg['vphas']['resolved_cat_dir'],
+                                 self.name,
+                                 fn.replace('cat', 'resolved'))  # 'calibrated'
             instring += 'in={0} '.format(fnres)
         param = {'l_min': self.l % 360, 'l_max': (self.l + self.size) % 360,
                  'b_min': self.b, 'b_max': self.b + self.size,}
