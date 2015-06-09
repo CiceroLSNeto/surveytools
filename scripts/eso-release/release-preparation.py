@@ -16,7 +16,8 @@ from astropy.time import Time
 from surveytools import SURVEYTOOLS_DATA
 
 
-DESTINATION = '/home/gb/tmp/eso'
+DESTINATION = "/car-data/gb/vphas/psfcat/eso"
+TILEGLOB = "/car-data/gb/vphas/psfcat/tiled/*"
 
 
 def tile_centre(l, b):
@@ -147,11 +148,11 @@ def create_metatile(template_fn, output_fn):
     mf[0].header.set('FILTER4', 'i_SDSS', 'columns with suffix i')
     mf[0].header.set('FILTER5', 'NB_659', 'columns with suffix ha')
     # 5-sigma Vega limits from Janet
-    mf[0].header.set('MAGLIM1', 21.1)
-    mf[0].header.set('MAGLIM2', 22.5)
-    mf[0].header.set('MAGLIM3', 21.6)
-    mf[0].header.set('MAGLIM4', 20.7)
-    mf[0].header.set('MAGLIM5', 20.7)
+    mf[0].header.set('MAGLIM1', 22.1) # Converted to AB 
+    mf[0].header.set('MAGLIM2', 22.4) # Converted to AB
+    mf[0].header.set('MAGLIM3', 21.7) # Converted to AB
+    mf[0].header.set('MAGLIM4', 21.1) # Converted to AB
+    mf[0].header.set('MAGLIM5', 21.0) # Converted to AB: +0.2 mag for continuum +0.1 mag for absorption line
     mf[0].header.set('PHOTSYS', 'VEGA',
                      'Note: columns with suffix _AB are in AB')
     mf[0].header.set('SKYSQDEG', 629)
@@ -171,15 +172,16 @@ def create_metatile(template_fn, output_fn):
     return output_fn
 
 
-def process_all(tileglob='/home/gb/tmp/vphas_l*'):
+def process_all(tileglob=TILEGLOB):
     import multiprocessing
-    pool = multiprocessing.Pool(8)
+    pool = multiprocessing.Pool(20)
     result = pool.map(fix_header, glob.glob(tileglob))
-    create_metatile(result[0], os.path.join(DESTINATION, 'VPHASDR2_PSC_METADATA.fits'))
 
 
 if __name__ == '__main__':
     process_all()
+    create_metatile('/car-data/gb/vphas/psfcat/eso/VPHASDR2_PSC_L4_B-3.fits',
+                    '/car-data/gb/vphas/psfcat/eso/VPHASDR2_PSC_METADATA.fits')
     """
     TILEDIR = '/home/gb/tmp'
     TARGETDIR = '/home/gb/tmp/eso'
