@@ -62,7 +62,11 @@ def fix_header(input_fn, output_path=DESTINATION, add_prov_keywords=True):
     f[0].header.set('OBJECT', tilename, 'Survey tile designation')
     f[0].header.set('RA', ra, 'Survey tile centre (J2000.0)')
     f[0].header.set('DEC', dec, 'Survey tile centre (J2000.0)')
-    f[0].header.set('PROG_ID', '177.D-3023', 'ESO programme identification')  
+    f[0].header.set('PROG_ID', 'MULTI', 'ESO programme identification')
+    f[0].header.set('PROGID1', '177.D-3023(B)', 'ESO programme identification')
+    f[0].header.set('PROGID2', '177.D-3023(C)', 'ESO programme identification')
+    f[0].header.set('PROGID3', '177.D-3023(D)', 'ESO programme identification')
+    f[0].header.set('PROGID4', '177.D-3023(E)', 'ESO programme identification')
     f[0].header.set('OBSTECH', 'IMAGE,OFFSET', 'Originating science file')
     f[0].header.set('PRODCATG', 'SCIENCE.CATALOGTILE', 'Data product category')
     f[0].header.set('REFERENC', '2014MNRAS.440.2036D', 'Survey paper reference')
@@ -132,7 +136,8 @@ def create_metatile(template_fn, output_fn):
                      'UT date when this file was written')
 
     for kw in ['ORIGIN', 'TELESCOP', 'INSTRUME',
-               'PROG_ID', 'OBSTECH', 'REFERENC']:
+               'PROG_ID', 'PROGID1', 'PROGID2', 'PROGID3', 'PROGID4',
+               'OBSTECH', 'REFERENC']:
         mf[0].header[kw] = template[0].header[kw]
 
     # Survey period dates taken from Janet's image metadata file
@@ -158,7 +163,7 @@ def create_metatile(template_fn, output_fn):
     mf[0].header.set('MAGLIM5', 21.0) # Converted to AB: +0.2 mag for continuum +0.1 mag for absorption line
     mf[0].header.set('PHOTSYS', 'VEGA',
                      'Note: columns with suffix _AB are in AB')
-    mf[0].header.set('SKYSQDEG', 629)
+    mf[0].header.set('SKYSQDEG', 629.0)
     mf[0].header.set('EPS_REG', 'VPHAS')
 
     # First extension is a data-less header of the tiles

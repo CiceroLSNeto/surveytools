@@ -31,6 +31,7 @@ def get_median_shifts():
 def get_shifts(offset):
     """Returns the shifts to apply to the various columns."""
     if offset not in SHIFTS:
+        log.warning('Using median offsets for {}'.format(offset))
         return get_median_shifts()
     shifts = {}
     for band in ['u', 'g', 'r2', 'r', 'i']:
@@ -76,6 +77,6 @@ if __name__ == '__main__':
     filenames = glob.glob('/car-data/gb/vphas/psfcat/resolved/*resolved.fits')
 
     import multiprocessing
-    pool = multiprocessing.Pool(8)
+    pool = multiprocessing.Pool(16)
     pool.map(apply_calibration, filenames)
     #apply_calibration('tmp/0005a-1-resolved.fits')
