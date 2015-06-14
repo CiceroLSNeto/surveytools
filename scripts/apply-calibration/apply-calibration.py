@@ -1,11 +1,30 @@
 """Applies the APASS-based calibration to the resolved catalogues."""
+import os
 import glob
 
 import numpy as np
 
 from astropy import log
+from astropy import table
 from astropy.table import Table
 from astropy.io import fits
+
+from surveytools import SURVEYTOOLS_DATA
+
+def get_calib_group(imagetbl="vphas-dr2-red-images.fits"):
+    tbl = table.Table.read(os.path.join(SURVEYTOOLS_DATA, imagetbl))
+    tbl['night'] = [fn[0:9] for fn in tbl['image file']]
+    calib_groups = {}
+    for group in tbl.group_by('night').groups:
+        fields = np.unique(group['Field_1'])
+        mygroup = [fld.split('_')[1]+off for fld in fields for off in ['a', 'b']]
+        for offset in mygroup:
+            calib_groups[offset] = mygroup
+    return calib_groups
+
+RED_GROUPS = get_calib_group("vphas-dr2-red-images.fits")
+BLUE_GROUPS = get_calib_group("vphas-dr2-blue-images.fits")
+
 
 # Read the per-offset shifts into a dictionary
 SHIFTS_TBL = Table.read('shifts-mike.fits')
@@ -28,16 +47,47 @@ def get_median_shifts():
     return shifts
 
 
+def get_night_shifts(offset):
+    """Returns the mean APASS-based shifts for all the offsets in the same night."""
+    shifts = {}
+    shifts_std = {}
+    for band in ['r', 'i']:
+        offset_shifts = []
+        for sibling in red_groups[offset]:
+            try:
+                offset_shifts.append(SHIFTS[sibling][band + 'shift'])
+            except KeyError:
+                pass
+        shifts[band] = np.nanmean(offset_shifts)
+        shifts_std[band] = np.nanstd(offset_shifts)
+    if offset not in blue_groups:
+        for band in ['u', 'g', 'r2']:
+            shifts[band] = np.nan
+    else:
+        for band in ['u', 'g', 'r2']:
+            offset_shifts = []
+            for sibling in blue_groups[offset]:
+                try:
+                    offset_shifts.append(SHIFTS[sibling][band + 'shift'])
+                except KeyError:
+                    pass
+            shifts[band] = np.nanmean(offset_shifts)
+            shifts_std[band] = np.nanstd(offset_shifts)
+    return shifts, shifts_std
+
+
 def get_shifts(offset):
     """Returns the shifts to apply to the various columns."""
-    if offset not in SHIFTS:
-        log.warning('Using median offsets for {}'.format(offset))
-        return get_median_shifts()
-    shifts = {}
-    for band in ['u', 'g', 'r2', 'r', 'i']:
-        shifts[band] = SHIFTS[offset][band + 'shift']
-        if np.isnan(shifts[band]):
-            shifts[band] = get_median_shifts()[band]
+    #if offset not in SHIFTS:
+    #    log.warning('Using median offsets for {}'.format(offset))
+    #    return get_median_shifts()
+    #shifts = {}
+    #for band in ['u', 'g', 'r2', 'r', 'i']:
+    #    shifts[band] = SHIFTS[offset][band + 'shift']
+    #    if np.isnan(shifts[band]):
+    #        shifts[band] = get_median_shifts()[band]
+    shifts, shifts_std = get_night_shifts(offset)
+    for band in shifts.keys():
         shifts[band + '_ab'] = shifts[band] + VEGA2AB[band]
     # H-alpha uses the r-band shift but requires a special ZPT correction to fix the offset to 3.01
     hazpcorr = HA_ZPT_CORR[offset]
