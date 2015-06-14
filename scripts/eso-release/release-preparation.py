@@ -19,6 +19,10 @@ from surveytools import SURVEYTOOLS_DATA
 DESTINATION = "/car-data/gb/vphas/psfcat/eso"
 TILEGLOB = "/car-data/gb/vphas/psfcat/tiled/*"
 
+# Set TINDXi = True for these columns
+INDEXES = ["u_g", "g_r2", "r_i", "r_ha",
+           "u", "g", "r2", "ha", "r", "i",
+           "clean", "clean_u", "clean_g", "clean_r2", "clean_ha", "clean_r", "clean_i"]
 
 def tile_centre(l, b):
     """Returns the center of a VPHAS catalogue tile in ICRS (ra, dec)."""
@@ -91,7 +95,7 @@ def fix_header(input_fn, output_path=DESTINATION, add_prov_keywords=True):
                 if re.fullmatch('o[0-9]{8}_[0-9]*.fits.fz', fn) != None:
                     prov.append(fn)
         for idx, fn in enumerate(sorted(prov)):
-            f[0].header.set('PROV{}'.format(idx+1), fn, 'Originating science file')
+            f[0].header.set('PROV{}'.format(idx+1), '184/' + fn, 'Originating science file')
 
     # Now we set the keywords of the first extension that contains the data
     f[1].header.set('EXTNAME', 'PHASE3CATALOG', 'FITS Extension name')
@@ -110,6 +114,11 @@ def fix_header(input_fn, output_path=DESTINATION, add_prov_keywords=True):
                                     colmeta[colname][field],
                                     '',
                                     after=kw.replace('TTYPE', 'TFORM'))
+        # Indicate which columns deserve a database index
+        if colname in INDEXES:
+            f[1].header.set(kw.replace('TTYPE', 'TINDX'),
+                            True,
+                            after=kw.replace('TTYPE', 'tcomm'))
 
     #shift_u = -0.63
     #shift_g = -10.347
