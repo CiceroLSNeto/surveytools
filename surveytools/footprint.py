@@ -402,10 +402,10 @@ def vphas_filenames_main(args=None):
 def glon_formatter(l, tickno):
     if l < 0:
         l += 360
-    return '$%0.f^\circ$' % l
+    return '%0.f°' % l
 
 def glat_formatter(b, tickno):
-    return '$%.0f^\circ$' % b
+    return '%.0f°' % b
 
 def vphas_offset_name_generator():
     """Generator function yielding all the names of the VPHAS offsets."""
@@ -422,126 +422,5 @@ def vphas_offset_generator():
 # Dev testing
 if __name__ == '__main__':
     fp = VphasFootprint()
-    #d = fp.get_field_dict()
     d = fp.offsets
     p = fp.plot().savefig('test.png')
-
-"""
-# Load the VPHAS field positions and their status
-tbl = Table.read('vphas_pos_status.dat.20141030', format='ascii')
-ra, dec = tbl['RA'], tbl['Dec']
-finished_mask = tbl['finished'] == 'true'
-hari_mask = (tbl['Hari'] == 'true') & -finished_mask
-ugr_mask = (tbl['ugr'] == 'true') & -finished_mask
-
-
-def glon_formatter(l, tickno):
-    if l < 0:
-        l += 360
-    return '$%0.f^\circ$' % l
-
-def glat_formatter(b, tickno):
-    return '$%.0f^\circ$' % b
-
-
-fields = []
-
-for (myra, mydec) in zip(ra, dec):
-    cd = cos(radians(mydec))
-    
-    corners_ra = [myra-0.5/cd, myra-0.5/cd, myra+0.5/cd, myra+0.5/cd, myra-0.5/cd]
-    corners_dec = [mydec-0.5, mydec+0.5, mydec+0.5, mydec-0.5, mydec-0.5]
-
-    icrs = coordinates.ICRS(ra=corners_ra, dec=corners_dec, unit=('deg','deg'))
-    field = [[c.l.to(u.deg).value, c.b.to(u.deg).value] for c in icrs.galactic]
-    fields.append(field)
-
-fields = np.array(fields)
-fields[fields > 180] -= 360
-
-fig = figure(figsize=(7.5, 4)) #7,5
-subplots_adjust(0.08, 0.04, 0.96, 0.99, wspace=0.15, hspace=0.15)
-
-
-poly_finished, poly_hari, poly_ugr = [], [], []
-poly_notstarted = []
-
-glat1 = -11
-glat2 = 11
-stepsize = 100
-xstart = [-60, -160]
-for i in range(len(xstart)):
-    ax = subplot(2.0, 1, i+1)
-    subplots_adjust(left=0.09, bottom=0.12, 
-                    right=0.98, top=0.87, 
-                    hspace=0.2, wspace=0.2)    
-    
-    for fieldno, f in enumerate(fields):
-        if (f[0][0] < xstart[i]-5 ) or (f[0][0] > xstart[i]+stepsize+5 ):
-            continue
-        
-        if finished_mask[fieldno]:
-            poly = matplotlib.patches.Polygon(f, alpha=1,
-                                              facecolor="#4daf4a", 
-                                              edgecolor="#222222")
-            poly_finished.append(poly)
-        elif hari_mask[fieldno]:
-            poly = matplotlib.patches.Polygon(f, alpha=1,
-                                              facecolor="#e41a1c",
-                                              edgecolor="#222222")
-            poly_hari.append(poly)
-        elif ugr_mask[fieldno]:
-            poly = matplotlib.patches.Polygon(f, alpha=1,
-                                              facecolor="#377eb8",
-                                              edgecolor="#222222")
-            poly_ugr.append(poly)
-        else:
-            poly = matplotlib.patches.Polygon(f, alpha=1.,
-                                              facecolor="#dddddd", 
-                                              edgecolor="#999999",
-                                              zorder=-100)
-            poly_notstarted.append(poly)
-        ax.add_patch(poly) 
-
-    glon1 = xstart[i]
-    glon2 = glon1+stepsize
-    
-    xlim(glon1+stepsize, glon1)
-    ylim([glat1,glat2])
-    
-
-    ax.xaxis.set_major_locator( MultipleLocator(base=10.0) )
-    
-    ax.xaxis.set_minor_locator( MultipleLocator(base=1.0) )
-    ax.yaxis.set_minor_locator( MultipleLocator(base=1.0) )
-
-    ax.xaxis.set_major_formatter( plt.FuncFormatter(glon_formatter) )
-    ax.yaxis.set_major_formatter( plt.FuncFormatter(glat_formatter) )
-
-    if i == 0:
-        legend((poly_finished[0], poly_ugr[0], poly_hari[0], poly_notstarted[0]),
-               ('u,g,r and H$\\mathrm{\\alpha}$,r,i observed',
-                'u,g,r observed',
-                'H$\\textrm{\\alpha}$,r,i observed',
-                'Awaiting observation'),
-               fontsize=9,
-               bbox_to_anchor=(0., 1.1, 1., .102),
-               loc=3,
-               ncol=4,
-               borderaxespad=0.,
-               handlelength=0.8,
-               frameon=False )
-    
-    if i == 1:
-        xlabel("Galactic longitude ($l$)", fontsize=11)
-
-
-ylabel("Galactic latitude ($b$)", fontsize=11)
-gca().yaxis.set_label_coords(-0.06, 1.)
-
-#plt.tight_layout()
-#interactive(True)
-#show()
-savefig("vphas-observed.pdf")
-close()
-"""
